@@ -3,29 +3,30 @@
 <head>
   <meta charset="UTF-8">
   <title>📚 Enhanced ISBN Scanner</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <script src="https://unpkg.com/html5-qrcode"></script>
   <style>
-    body { font-family: Arial; max-width: 600px; margin: auto; padding: 1em; background: #f9f9f9; }
-    #reader, video { width:100%; }
-    .buttons, button { width:48%; margin:1%; padding:0.8em; font-size:1em; box-sizing:border-box; }
-    button { cursor:pointer; }
-    #shutter { background:#2196F3; color:#fff; border:none; transition:.3s; }
-    #shutter:hover { background:#1976D2; }
+    body { font-family: Arial; max-width:600px;margin:auto;padding:1em;background:#f9f9f9; }
+    #video, #canvas { width:100%; }
+    .buttons, button { width:48%; margin:1%; padding:0.8em;font-size:1em;box-sizing:border-box; }
+    button { cursor:pointer; border:none; }
+    #shutter { background:#2196F3;color:#fff; }
+    #clear { background:#f44336;color:#fff; }
     .isbn-line { margin:0.2em 0; padding:0.5em; background:#fff; border:1px solid #ddd; cursor:pointer; }
     .isbn-line:hover { background:#e0f7fa; }
-    #status { margin-top:1em; padding:0.5em; display:none; }
-    .success { background:#dff0d8; color:#3c763d; }
-    .error { background:#f2dede; color:#a94442; }
+    #status { margin-top:1em;padding:0.5em; display:none; }
+    .success { background:#dff0d8;color:#3c763d; }
+    .error { background:#f2dede;color:#a94442; }
   </style>
 </head>
 <body>
 
 <h1>📚 Enhanced ISBN Scanner</h1>
-<div id="reader"></div>
+<video id="video" autoplay muted playsinline></video>
+<canvas id="canvas" style="display:none;"></canvas>
 
 <div class="buttons">
-  <button id="shutter">📸 Capture Book</button>
+  <button id="shutter">📸 Capture ISBN</button>
   <button id="clear">🗑 Clear List</button>
 </div>
 
@@ -37,97 +38,91 @@
 <textarea id="isbns" rows="6" placeholder="Scanned ISBNs appear here..." readonly></textarea>
 
 <script>
-const detected = new Map();
-const reader = new Html5Qrcode("reader");
+  let detected = new Map();
+  const video = document.getElementById("video");
+  const canvas = document.getElementById("canvas");
+  let html5qr = null;
 
-function showStatus(msg, err=false) {
-  const el = document.getElementById("status");
-  el.textContent = msg;
-  el.className = err ? "error" : "success";
-  el.style.display = "block";
-  setTimeout(() => el.style.display="none", 3000);
-}
-
-async function startCamera() {
-  try {
-    const cams = await Html5Qrcode.getCameras();
-    if (!cams.length) throw "No camera found";
-    await reader.start(
-      { facingMode:"environment" },
-      { fps:10, qrbox:{width:300,height:200} },
-      () => {}, () => {}
-    );
-  } catch (e) {
-    showStatus("Camera failed: "+e, true);
+  function showStatus(msg, err=false) {
+    const el = document.getElementById("status");
+    el.textContent = msg;
+    el.className = err ? "error" : "success";
+    el.style.display = "block";
+    setTimeout(() => el.style.display="none", 3000);
   }
-}
 
-function extractISBNs(text) {
-  return Array.from(new Set(
-    (text.match(/\b97[89][0-9]{10,12}\b/g) || [])
-  ));
-}
+  function extractISBNs(text) {
+    return Array.from(new Set(
+      (text.match(/\b97[89][0-9]{10}\b/g) || [])
+    ));
+  }
 
-async function lookup(isbn) {
-  try {
-    const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`);
-    const { items } = await res.json();
-    if (items && items.length) return items[0].volumeInfo.title;
-  } catch(e){}
-  return null;
-}
+  async function lookup(isbn) {
+    try {
+      const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`);
+      const data = await res.json();
+      if (data.items?.length) return data.items[0].volumeInfo.title;
+    } catch {}
+    return null;
+  }
 
-document.getElementById("shutter").onclick = async () => {
-  try {
-    const img = await reader.takePhoto();
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    canvas.width = img.width; canvas.height = img.height;
-    ctx.drawImage(img,0,0);
-    const data = ctx.getImageData(0,0,img.width,img.height);
-    const codes = extractISBNs(data); // using imageData.text is not possible; skip
-    // Instead use reader.scanFile
-    const file = await fetch(canvas.toDataURL()).then(res=>res.blob());
-    const result = await reader.scanFileV2(file, true);
-    const found = extractISBNs(result.decodedText || "");
-    if (!found.length) throw "No ISBN found. Try again.";
-    
-    for (const isbn of found) {
-      if (detected.has(isbn)) continue;
-      const title = await lookup(isbn);
-      detected.set(isbn, title || "rescan");
-      renderList();
+  async function initCamera() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      video.srcObject = stream;
+      html5qr = new Html5Qrcode(/* dummy */ "reader");
+    } catch (e) {
+      showStatus("Camera init failed: " + e.message, true);
     }
-  } catch (e) {
-    showStatus("Scan failed: "+e, true);
   }
-};
 
-function renderList() {
-  const listEl = document.getElementById("list");
-  listEl.innerHTML = "";
-  detected.forEach((title, isbn) => {
-    const div = document.createElement("div");
-    div.className = "isbn-line";
-    div.textContent = `${isbn}\t${title}`;
-    div.onclick = () => {
-      const ta = document.getElementById("isbns");
-      ta.value += div.textContent + "\n";
-      showStatus("Added "+isbn);
-    };
-    listEl.appendChild(div);
-  });
-}
+  document.getElementById("shutter").onclick = async () => {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0);
+    canvas.toBlob(async blob => {
+      try {
+        const result = await html5qr.scanFileV2(blob, true);
+        const found = extractISBNs(result.decodedText || "");
+        if (!found.length) throw "No ISBN detected.";
 
-document.getElementById("clear").onclick = () => {
-  detected.clear();
-  renderList();
-  document.getElementById("isbns").value = "";
-  showStatus("Cleared list");
-};
+        for (const isbn of found) {
+          if (detected.has(isbn)) continue;
+          const title = await lookup(isbn);
+          detected.set(isbn, title || "rescan");
+        }
+        renderList();
+      } catch (e) {
+        showStatus("Scan failed: " + e, true);
+      }
+    }, "image/png");
+  };
 
-window.onload = startCamera;
+  function renderList() {
+    const listEl = document.getElementById("list");
+    listEl.innerHTML = "";
+    for (const [isbn, title] of detected) {
+      const div = document.createElement("div");
+      div.className = "isbn-line";
+      div.textContent = `${isbn}\t${title}`;
+      div.onclick = () => {
+        const ta = document.getElementById("isbns");
+        ta.value += div.textContent + "\n";
+        showStatus("Added " + isbn);
+      };
+      listEl.appendChild(div);
+    }
+  }
+
+  document.getElementById("clear").onclick = () => {
+    detected.clear();
+    renderList();
+    document.getElementById("isbns").value = "";
+    showStatus("List cleared");
+  };
+
+  window.onload = initCamera;
 </script>
-
 </body>
 </html>
