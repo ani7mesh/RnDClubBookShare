@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html>
 <head>
   <title>📚 ISBN Scanner</title>
@@ -93,14 +94,12 @@
     let scanner = null;
 
     function cleanISBN(isbn) {
-      // Remove non-digit characters except 'X' (for ISBN-10)
       return isbn.replace(/[^0-9X]/gi, '').toUpperCase();
     }
 
     function isValidISBN(isbn) {
-      // Basic validation for ISBN-10 and ISBN-13
       const cleaned = cleanISBN(isbn);
-      return cleaned.length === 10 || cleaned.length === 13;
+      return cleaned.length === 13 && cleaned.startsWith("978");
     }
 
     function showStatus(message, isError = false) {
@@ -108,81 +107,74 @@
       statusEl.textContent = message;
       statusEl.className = isError ? 'error' : 'success';
       statusEl.style.display = 'block';
-      
-      setTimeout(() => {
-        statusEl.style.display = 'none';
-      }, 3000);
+      setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
     }
 
     function showScanFeedback() {
       const feedback = document.getElementById('scanFeedback');
       feedback.style.display = 'block';
-      setTimeout(() => {
-        feedback.style.display = 'none';
-      }, 300);
+      setTimeout(() => { feedback.style.display = 'none'; }, 300);
     }
 
     function updateCounter() {
       document.getElementById('count').textContent = isbns.size;
     }
 
-    async function onScanSuccess(decodedText) {
-      const cleanedISBN = cleanISBN(decodedText);
-      
-      if (!isValidISBN(cleanedISBN)) {
-        showStatus(`Invalid ISBN: ${decodedText}`, true);
-        return;
-      }
-      
-      if (isbns.has(cleanedISBN)) {
-        showStatus(`Duplicate ISBN: ${cleanedISBN}`, true);
-        return;
-      }
+    async function startBarcodeScanner() {
+      const qr = new Html5Qrcode("reader");
+      const formats = [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.UPC_A];
 
-      isbns.add(cleanedISBN);
-      document.getElementById('isbns').value = [...isbns].join('\n');
-      updateCounter();
-      showScanFeedback();
-    }
-
-    function initScanner() {
-      scanner = new Html5QrcodeScanner(
-        "reader", 
-        { 
-          fps: 10, 
-          qrbox: { width: 250, height: 150 },
-          formatsToSupport: [ Html5QrcodeSupportedFormats.EAN_13 ]
+      try {
+        const devices = await Html5Qrcode.getCameras();
+        if (!devices.length) {
+          showStatus("No camera found", true);
+          return;
         }
-      );
-      scanner.render(onScanSuccess);
+
+        await qr.start(
+          { facingMode: "environment" },
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 150 },
+            formatsToSupport: formats,
+          },
+          decodedText => {
+            const cleanedISBN = cleanISBN(decodedText);
+            if (!isValidISBN(cleanedISBN)) {
+              showStatus(`Invalid ISBN: ${decodedText}`, true);
+              return;
+            }
+
+            if (isbns.has(cleanedISBN)) {
+              showStatus(`Duplicate ISBN: ${cleanedISBN}`, true);
+              return;
+            }
+
+            isbns.add(cleanedISBN);
+            document.getElementById('isbns').value = [...isbns].join('\n');
+            updateCounter();
+            showScanFeedback();
+          },
+          error => { /* ignore scan errors */ }
+        );
+
+        scanner = qr;
+      } catch (err) {
+        showStatus("Camera error: " + err.message, true);
+      }
     }
 
     document.getElementById('send').onclick = () => {
       const email = document.getElementById('email').value.trim();
       const list = document.getElementById('isbns').value.trim();
 
-      if (!email) {
-        showStatus("Please enter your email address.", true);
-        return;
-      }
-      
-      // Basic email validation
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        showStatus("Please enter a valid email address.", true);
-        return;
-      }
-
-      if (!list) {
-        showStatus("No ISBNs scanned.", true);
-        return;
-      }
+      if (!email) return showStatus("Please enter your email address.", true);
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showStatus("Invalid email address.", true);
+      if (!list) return showStatus("No ISBNs scanned.", true);
 
       const subject = encodeURIComponent("Scanned ISBNs");
       const body = encodeURIComponent(`Scanned ISBNs:\n\n${list}\n\nTotal: ${isbns.size}`);
-      const mailtoLink = `mailto:${email}?subject=${subject}&body=${body}`;
-
-      window.location.href = mailtoLink;
+      window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
     };
 
     document.getElementById('clear').onclick = () => {
@@ -192,8 +184,7 @@
       showStatus("List cleared successfully");
     };
 
-    // Initialize scanner when page loads
-    window.onload = initScanner;
+    window.onload = startBarcodeScanner;
   </script>
 </body>
 </html>
