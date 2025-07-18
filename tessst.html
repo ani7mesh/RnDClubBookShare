@@ -1,10 +1,9 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>📚 ISBN Capture (Barcode + OCR)</title>
+  <title>📚 ISBN Scanner & Manual Entry</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://unpkg.com/@zxing/browser@latest"></script>
-  <script src="https://unpkg.com/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.1.1/dist/tesseract.min.js"></script>
   <style>
     body {
       font-family: sans-serif;
@@ -12,130 +11,90 @@
       background: #f4f4f4;
       max-width: 600px;
       margin: auto;
-      text-align: center;
     }
-    video, canvas {
+    textarea, input, button {
       width: 100%;
-      height: 50vh;
       margin-top: 1em;
-      border: 1px solid #ccc;
-    }
-    button {
-      padding: 1em;
+      padding: 0.8em;
       font-size: 1em;
-      width: 100%;
+    }
+    #camera {
+      height: 240px;
+      border: 2px dashed gray;
       margin-top: 1em;
-      background-color: #4CAF50;
-      color: white;
-      border: none;
-      cursor: pointer;
+      background: #ddd;
+      text-align: center;
+      line-height: 240px;
     }
-    button:hover {
-      background-color: #45a049;
-    }
-    #status {
-      margin-top: 1em;
-      padding: 0.5em;
-      display: none;
-    }
-    .success {
-      background-color: #dff0d8;
-      color: #3c763d;
-    }
-    .error {
-      background-color: #f2dede;
-      color: #a94442;
-    }
-    #isbnResult {
-      margin-top: 1em;
-      font-weight: bold;
+    .title-pair {
+      margin: 0.3em 0;
     }
   </style>
 </head>
 <body>
-  <h1>📚 ISBN Capture</h1>
 
-  <video id="video" autoplay muted playsinline></video>
-  <canvas id="canvas" style="display:none;"></canvas>
-  <button id="shutter">📸 Capture & Detect ISBN</button>
+  <h2>📚 ISBN Scanner & Manual Entry</h2>
 
-  <div id="status"></div>
-  <div id="isbnResult"></div>
+  <label for="email">📧 Your Email:</label>
+  <input type="email" id="email" placeholder="you@example.com" />
+
+  <div id="camera">📷 Camera interface placeholder</div>
+
+  <label for="manual">✍️ Manual ISBN Entry (one per line):</label>
+  <textarea id="manual" rows="6" placeholder="9780140449136\n9780262033848"></textarea>
+
+  <button onclick="processISBNs()">🔍 Lookup Titles & Send</button>
+
+  <div id="results"></div>
 
   <script>
-    const video = document.getElementById("video");
-    const canvas = document.getElementById("canvas");
-    const statusDiv = document.getElementById("status");
-    const resultDiv = document.getElementById("isbnResult");
-
-    function showStatus(msg, isError = false) {
-      statusDiv.textContent = msg;
-      statusDiv.className = isError ? 'error' : 'success';
-      statusDiv.style.display = 'block';
-    }
-
-    function cleanISBN(text) {
-      const match = text.match(/(?:ISBN[- ]*13[: ]*)?([0-9]{13})|(?:ISBN[- ]*10[: ]*)?([0-9X]{10})/i);
-      if (!match) return null;
-      return match[1] || match[2];
-    }
-
-    async function initCamera() {
+    async function lookupISBN(isbn) {
+      const clean = isbn.replace(/[^0-9X]/gi, '');
+      if (clean.length !== 10 && clean.length !== 13) return { isbn, title: "rescan" };
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" }
-        });
-        video.srcObject = stream;
-        showStatus("Camera ready");
+        const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${clean}`);
+        const data = await res.json();
+        const title = data.totalItems ? data.items[0].volumeInfo.title : "rescan";
+        return { isbn: clean, title };
       } catch (e) {
-        showStatus("Camera access denied.", true);
-        console.error(e);
+        return { isbn: clean, title: "rescan" };
       }
     }
 
-    document.getElementById("shutter").onclick = async () => {
-      showStatus("Capturing...");
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(video, 0, 0);
-
-      const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.95));
-      const imageUrl = URL.createObjectURL(blob);
-
-      // Try barcode first
-      try {
-        const codeReader = new ZXing.BrowserMultiFormatReader();
-        const result = await codeReader.decodeFromImageUrl(imageUrl);
-        const isbn = cleanISBN(result.text);
-        if (isbn) {
-          resultDiv.textContent = `📦 ISBN (Barcode): ${isbn}`;
-          showStatus("ISBN found via barcode ✅");
-          return;
-        }
-      } catch (err) {
-        console.log("Barcode scan failed, falling back to OCR...");
+    async function processISBNs() {
+      const email = document.getElementById("email").value.trim();
+      const raw = document.getElementById("manual").value.trim();
+      if (!email || !raw) {
+        alert("Please enter both email and ISBNs.");
+        return;
       }
 
-      // OCR fallback
-      try {
-        showStatus("Trying OCR...");
-        const { data: { text } } = await Tesseract.recognize(blob, 'eng');
-        const isbn = cleanISBN(text);
-        if (isbn) {
-          resultDiv.textContent = `🔍 ISBN (OCR): ${isbn}`;
-          showStatus("ISBN found via OCR ✅");
-        } else {
-          resultDiv.textContent = "❌ No valid ISBN found. Please rescan.";
-          showStatus("No ISBN found. Try again.", true);
-        }
-      } catch (ocrErr) {
-        showStatus("OCR failed.", true);
-        console.error(ocrErr);
-      }
-    };
+      const list = raw.split("\n").map(x => x.trim()).filter(x => x);
+      const final = [];
+      const resultsDiv = document.getElementById("results");
+      resultsDiv.innerHTML = "Looking up titles...";
 
-    window.onload = initCamera;
+      for (const isbn of list) {
+        const result = await lookupISBN(isbn);
+        final.push(result);
+      }
+
+      // Display results
+      resultsDiv.innerHTML = "<h3>Matched ISBNs</h3>";
+      final.forEach(entry => {
+        const div = document.createElement("div");
+        div.className = "title-pair";
+        div.textContent = `${entry.isbn}\t${entry.title}`;
+        resultsDiv.appendChild(div);
+      });
+
+      // Prepare mailto link
+      const body = final.map(f => `${f.isbn}\t${f.title}`).join("\n");
+      const mailLink = `mailto:${email}?subject=ISBNs Scanned&body=${encodeURIComponent(body)}`;
+      setTimeout(() => {
+        window.location.href = mailLink;
+      }, 1000);
+    }
   </script>
 </body>
 </html>
