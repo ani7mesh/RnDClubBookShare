@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>📚 ISBN Capture (Smart OCR + Barcode)</title>
+  <title>📚 ISBN Capture (Enhanced OCR)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="https://unpkg.com/@zxing/browser@latest"></script>
   <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
@@ -45,27 +45,19 @@
       padding: 0.5em;
       display: none;
     }
-    .success {
-      background-color: #dff0d8;
-      color: #3c763d;
-    }
-    .error {
-      background-color: #f2dede;
-      color: #a94442;
-    }
+    .success { background-color: #dff0d8; color: #3c763d; }
+    .error { background-color: #f2dede; color: #a94442; }
   </style>
 </head>
 <body>
-  <h1>📚 ISBN Capture</h1>
+  <h1>📚 ISBN Capture (Enhanced OCR)</h1>
 
   <video id="video" autoplay muted playsinline></video>
   <canvas id="canvas" style="display:none;"></canvas>
 
   <button id="shutter">📸 Capture & Detect ISBN</button>
-
   <div id="status"></div>
-  <textarea id="isbnText" placeholder="Detected ISBNs and Titles..."></textarea>
-
+  <textarea id="isbnText" placeholder="Detected ISBNs will appear here..."></textarea>
   <button id="sendEmail">📧 Send to Email</button>
 
   <script>
@@ -81,23 +73,21 @@
       statusDiv.style.display = 'block';
     }
 
+    function cleanISBN(text) {
+      const m = text.match(/(?:ISBN(?:-1[03])?:?\s*)?((97[89]?[- ]?)?\d{9,12}[\dX])/i);
+      return m ? m[1].replace(/[-\s]/g, '') : null;
+    }
+
     function extractISBNRightOfKeyword(text) {
-      const lines = text.split('\n');
-      for (let line of lines) {
+      for (let line of text.split('\n')) {
         if (/ISBN/i.test(line)) {
-          const parts = line.split(/ISBN(?:-13)?:?/i);
-          if (parts.length > 1) {
-            const possible = parts[1].match(/[0-9]{10,13}[\dX]/);
-            if (possible) return possible[0];
+          const parts = line.split(/ISBN(?:-1[03])?:?/i);
+          if (parts[1]) {
+            const m = parts[1].match(/[\s]*([0-9]{10,13}[\dX])/);
+            if (m) return m[1];
           }
         }
       }
-      return null;
-    }
-
-    function cleanISBN(text) {
-      const match = text.match(/(?:ISBN(?:-1[03])?:?\s*)?((97[89][- ]?)?\d{1,5}[- ]?\d{1,7}[- ]?\d{1,7}[- ]?[\dX])/i);
-      if (match) return match[1].replace(/[-\s]/g, '');
       return null;
     }
 
@@ -105,100 +95,85 @@
       try {
         const res = await fetch(`${GOOGLE_API}${isbn}`);
         const data = await res.json();
-        if (data.totalItems > 0) {
-          return data.items[0].volumeInfo.title;
-        }
-      } catch (err) {
-        console.error("Lookup failed", err);
-      }
+        if (data.totalItems > 0) return data.items[0].volumeInfo.title;
+      } catch (e) {}
       return "rescan";
     }
 
-    async function detectISBN(blob) {
-      const imageUrl = URL.createObjectURL(blob);
-
-      // 1️⃣ Try QuaggaJS
-      const quaggaISBN = await new Promise(resolve => {
-        Quagga.decodeSingle({
-          src: imageUrl,
-          locate: true,
-          decoder: { readers: ['ean_reader', 'upc_reader'] }
-        }, result => {
-          if (result && result.codeResult?.code) resolve(cleanISBN(result.codeResult.code));
-          else resolve(null);
-        });
+    async function preprocessOCR(blob) {
+      return await new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => {
+          const tmp = document.createElement('canvas');
+          tmp.width = img.width; tmp.height = img.height;
+          const ctx = tmp.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          const imgData = ctx.getImageData(0,0,tmp.width,tmp.height);
+          const d = imgData.data;
+          for (let i = 0; i < d.length; i += 4) {
+            const avg = (d[i]+d[i+1]+d[i+2])/3;
+            d[i]=d[i+1]=d[i+2]= avg>128?255:0;
+          }
+          ctx.putImageData(imgData,0,0);
+          tmp.toBlob(resolve, 'image/jpeg', 0.95);
+        };
+        img.src = URL.createObjectURL(blob);
       });
+    }
 
-      if (quaggaISBN) return quaggaISBN;
+    async function detectISBN(blob) {
+      const imgUrl = URL.createObjectURL(blob);
 
-      // 2️⃣ Try ZXing
+      const q = await new Promise(res => {
+        Quagga.decodeSingle({
+          src: imgUrl, locate: true,
+          decoder: { readers: ['ean_reader','upc_reader'] }
+        }, r => res(r && r.codeResult ? cleanISBN(r.codeResult.code) : null));
+      });
+      if (q) return q;
+
       try {
-        const zxing = new ZXing.BrowserMultiFormatReader();
-        const result = await zxing.decodeFromImageUrl(imageUrl);
-        const zxingISBN = cleanISBN(result.text);
-        if (zxingISBN) return zxingISBN;
-      } catch (e) {
-        console.log("ZXing failed", e);
-      }
+        const z = await new ZXing.BrowserMultiFormatReader().decodeFromImageUrl(imgUrl);
+        const zi = cleanISBN(z.text);
+        if (zi) return zi;
+      } catch (e) {}
 
-      // 3️⃣ Smart OCR
-      try {
-        const { data: { text } } = await Tesseract.recognize(blob, 'eng');
-        const directionalISBN = extractISBNRightOfKeyword(text);
-        if (directionalISBN) return directionalISBN;
-        return cleanISBN(text); // fallback to raw scan
-      } catch (err) {
-        console.error("OCR failed", err);
-        return null;
-      }
+      const preblob = await preprocessOCR(blob);
+      const { data:{ text } } = await Tesseract.recognize(preblob, 'eng');
+      return extractISBNRightOfKeyword(text) || cleanISBN(text);
     }
 
     document.getElementById("shutter").onclick = () => {
       showStatus("Capturing...");
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(video, 0, 0);
-
+      canvas.width=video.videoWidth; canvas.height=video.videoHeight;
+      canvas.getContext("2d").drawImage(video,0,0);
       canvas.toBlob(async blob => {
         const isbn = await detectISBN(blob);
         if (isbn) {
           const title = await lookupTitle(isbn);
           isbnText.value += `${isbn}\t${title}\n`;
-          showStatus(`ISBN detected and added ✅`);
-        } else {
-          showStatus("No valid ISBN found. Try again.", true);
-        }
-      }, 'image/jpeg', 0.95);
+          showStatus("ISBN detected ✅");
+        } else showStatus("No valid ISBN found.", true);
+      });
     };
 
     document.getElementById("sendEmail").onclick = () => {
-      const lines = isbnText.value.trim().split("\n");
-      const validISBNs = lines
-        .map(line => line.split("\t"))
-        .filter(([isbn, title]) => title && title.toLowerCase() !== "rescan")
-        .map(([isbn]) => isbn)
-        .join("\n");
-
-      const subject = "My Book ISBNs";
-      const body = encodeURIComponent(validISBNs || "No valid ISBNs found.");
-      const mailtoLink = `mailto:?subject=${subject}&body=${body}`;
-      window.location.href = mailtoLink;
+      const lines = isbnText.value.trim().split("\n")
+        .map(l => l.split("\t"))
+        .filter(([,t]) => t && t.toLowerCase()!=="rescan")
+        .map(([i]) => i).join("\n");
+      const mailto = `mailto:?subject=ISBNs&body=${encodeURIComponent(lines||"")}`;
+      window.location.href = mailto;
     };
 
     async function initCamera() {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" }
-        });
-        video.srcObject = stream;
+        video.srcObject = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:"environment" }});
         showStatus("Camera ready");
       } catch (e) {
         showStatus("Camera access denied.", true);
-        console.error(e);
       }
     }
-
     window.onload = initCamera;
   </script>
 </body>
