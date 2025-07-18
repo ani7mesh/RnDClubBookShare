@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>📚 ISBN Scanner</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://unpkg.com/html5-qrcode"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 1em;
+      background: #f9f9f9;
+    }
+    input, textarea, button {
+      width: 100%;
+      margin-top: 1em;
+      padding: 0.8em;
+      font-size: 1em;
+    }
+    button {
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    h1 {
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>📚 ISBN Scanner</h1>
+
+  <label for="email">📧 Enter Your Email:</label>
+  <input type="email" id="email" placeholder="yourname@example.com" required>
+
+  <div id="reader" style="width:100%; margin-top: 20px;"></div>
+
+  <label for="isbns">📋 Scanned ISBNs:</label>
+  <textarea id="isbns" rows="6" placeholder="Scan ISBNs here..." readonly></textarea>
+
+  <button id="send">Send ISBNs via Email</button>
+
+  <script>
+    const isbns = new Set();
+
+    function onScanSuccess(decodedText, decodedResult) {
+      if (!isbns.has(decodedText)) {
+        isbns.add(decodedText);
+        document.getElementById('isbns').value = [...isbns].join('\n');
+      }
+    }
+
+    const html5QrcodeScanner = new Html5QrcodeScanner(
+      "reader", { fps: 10, qrbox: 250 }
+    );
+    html5QrcodeScanner.render(onScanSuccess);
+
+    document.getElementById('send').onclick = () => {
+      const email = document.getElementById('email').value.trim();
+      const list = document.getElementById('isbns').value.trim();
+
+      if (!email) return alert("Please enter your email address.");
+      if (!list) return alert("No ISBNs scanned.");
+
+      const subject = encodeURIComponent("Scanned ISBNs");
+      const body = encodeURIComponent(list);
+      const mailtoLink = `mailto:${email}?subject=${subject}&body=${body}`;
+
+      window.location.href = mailtoLink;
+    };
+  </script>
+
+</body>
+</html>
