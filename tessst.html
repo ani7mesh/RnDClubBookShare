@@ -1,100 +1,182 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>📚 ISBN Scanner & Manual Entry</title>
+  <title>📚 ISBN Capture (Multi-Method)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.1.1/dist/tesseract.min.js"></script>
+  <script src="https://unpkg.com/@zxing/browser@latest"></script>
+  <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
+  <script src="https://unpkg.com/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
   <style>
     body {
       font-family: sans-serif;
-      padding: 1em;
       background: #f4f4f4;
+      padding: 1em;
       max-width: 600px;
       margin: auto;
+      text-align: center;
     }
-    textarea, input, button {
+    video, canvas {
+      width: 100%;
+      height: 50vh;
+      border: 1px solid #ccc;
+      margin-top: 1em;
+    }
+    textarea {
+      width: 100%;
+      height: 100px;
+      margin-top: 1em;
+      padding: 0.5em;
+    }
+    button {
+      padding: 1em;
+      font-size: 1em;
       width: 100%;
       margin-top: 1em;
-      padding: 0.8em;
-      font-size: 1em;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      cursor: pointer;
     }
-    #camera {
-      height: 240px;
-      border: 2px dashed gray;
+    button:hover {
+      background-color: #45a049;
+    }
+    #status {
       margin-top: 1em;
-      background: #ddd;
-      text-align: center;
-      line-height: 240px;
+      padding: 0.5em;
+      display: none;
     }
-    .title-pair {
-      margin: 0.3em 0;
+    .success {
+      background-color: #dff0d8;
+      color: #3c763d;
+    }
+    .error {
+      background-color: #f2dede;
+      color: #a94442;
     }
   </style>
 </head>
 <body>
+  <h1>📚 ISBN Capture</h1>
 
-  <h2>📚 ISBN Scanner & Manual Entry</h2>
+  <video id="video" autoplay muted playsinline></video>
+  <canvas id="canvas" style="display:none;"></canvas>
 
-  <label for="email">📧 Your Email:</label>
-  <input type="email" id="email" placeholder="you@example.com" />
+  <button id="shutter">📸 Capture & Detect ISBN</button>
 
-  <div id="camera">📷 Camera interface placeholder</div>
+  <div id="status"></div>
+  <textarea id="isbnText" placeholder="Detected ISBNs will appear here..."></textarea>
 
-  <label for="manual">✍️ Manual ISBN Entry (one per line):</label>
-  <textarea id="manual" rows="6" placeholder="9780140449136\n9780262033848"></textarea>
-
-  <button onclick="processISBNs()">🔍 Lookup Titles & Send</button>
-
-  <div id="results"></div>
+  <button id="sendEmail">📧 Send to Email</button>
 
   <script>
-    async function lookupISBN(isbn) {
-      const clean = isbn.replace(/[^0-9X]/gi, '');
-      if (clean.length !== 10 && clean.length !== 13) return { isbn, title: "rescan" };
-      try {
-        const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${clean}`);
-        const data = await res.json();
-        const title = data.totalItems ? data.items[0].volumeInfo.title : "rescan";
-        return { isbn: clean, title };
-      } catch (e) {
-        return { isbn: clean, title: "rescan" };
-      }
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const statusDiv = document.getElementById("status");
+    const isbnText = document.getElementById("isbnText");
+    const GOOGLE_API = "https://www.googleapis.com/books/v1/volumes?q=isbn:";
+
+    function showStatus(msg, isError = false) {
+      statusDiv.textContent = msg;
+      statusDiv.className = isError ? 'error' : 'success';
+      statusDiv.style.display = 'block';
     }
 
-    async function processISBNs() {
-      const email = document.getElementById("email").value.trim();
-      const raw = document.getElementById("manual").value.trim();
-      if (!email || !raw) {
-        alert("Please enter both email and ISBNs.");
-        return;
+    function cleanISBN(text) {
+      const match = text.match(/(?:ISBN(?:-1[03])?:?\s*)?((97[89][- ]?)?\d{1,5}[- ]?\d{1,7}[- ]?\d{1,7}[- ]?[\dX])/i);
+      if (match) return match[1].replace(/[-\s]/g, '');
+      return null;
+    }
+
+    async function lookupTitle(isbn) {
+      try {
+        const res = await fetch(`${GOOGLE_API}${isbn}`);
+        const data = await res.json();
+        if (data.totalItems > 0) {
+          return data.items[0].volumeInfo.title;
+        }
+      } catch (err) {
+        console.error("Lookup failed", err);
       }
+      return "rescan";
+    }
 
-      const list = raw.split("\n").map(x => x.trim()).filter(x => x);
-      const final = [];
-      const resultsDiv = document.getElementById("results");
-      resultsDiv.innerHTML = "Looking up titles...";
+    async function detectISBN(blob) {
+      const imageUrl = URL.createObjectURL(blob);
 
-      for (const isbn of list) {
-        const result = await lookupISBN(isbn);
-        final.push(result);
-      }
-
-      // Display results
-      resultsDiv.innerHTML = "<h3>Matched ISBNs</h3>";
-      final.forEach(entry => {
-        const div = document.createElement("div");
-        div.className = "title-pair";
-        div.textContent = `${entry.isbn}\t${entry.title}`;
-        resultsDiv.appendChild(div);
+      // 1️⃣ Try QuaggaJS
+      const quaggaISBN = await new Promise(resolve => {
+        Quagga.decodeSingle({
+          src: imageUrl,
+          locate: true,
+          decoder: { readers: ['ean_reader', 'upc_reader'] }
+        }, result => {
+          if (result && result.codeResult?.code) resolve(cleanISBN(result.codeResult.code));
+          else resolve(null);
+        });
       });
 
-      // Prepare mailto link
-      const body = final.map(f => `${f.isbn}\t${f.title}`).join("\n");
-      const mailLink = `mailto:${email}?subject=ISBNs Scanned&body=${encodeURIComponent(body)}`;
-      setTimeout(() => {
-        window.location.href = mailLink;
-      }, 1000);
+      if (quaggaISBN) return quaggaISBN;
+
+      // 2️⃣ Try ZXing
+      try {
+        const zxing = new ZXing.BrowserMultiFormatReader();
+        const result = await zxing.decodeFromImageUrl(imageUrl);
+        const zxingISBN = cleanISBN(result.text);
+        if (zxingISBN) return zxingISBN;
+      } catch (e) {
+        console.log("ZXing failed", e);
+      }
+
+      // 3️⃣ Try OCR
+      try {
+        const { data: { text } } = await Tesseract.recognize(blob, 'eng');
+        return cleanISBN(text);
+      } catch (err) {
+        console.error("OCR failed", err);
+        return null;
+      }
     }
+
+    document.getElementById("shutter").onclick = () => {
+      showStatus("Capturing...");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0);
+
+      canvas.toBlob(async blob => {
+        const isbn = await detectISBN(blob);
+        if (isbn) {
+          const title = await lookupTitle(isbn);
+          isbnText.value += `${isbn}\t${title}\n`;
+          showStatus(`ISBN detected and added ✅`);
+        } else {
+          showStatus("No valid ISBN found. Try again.", true);
+        }
+      }, 'image/jpeg', 0.95);
+    };
+
+    document.getElementById("sendEmail").onclick = () => {
+      const subject = "My Book ISBNs";
+      const body = encodeURIComponent(isbnText.value);
+      const mailtoLink = `mailto:?subject=${subject}&body=${body}`;
+      window.location.href = mailtoLink;
+    };
+
+    async function initCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" }
+        });
+        video.srcObject = stream;
+        showStatus("Camera ready");
+      } catch (e) {
+        showStatus("Camera access denied.", true);
+        console.error(e);
+      }
+    }
+
+    window.onload = initCamera;
   </script>
 </body>
 </html>
