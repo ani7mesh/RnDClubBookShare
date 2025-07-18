@@ -1,677 +1,105 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
+  <title>📚 ISBN Capture (Barcode + OCR)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>📚 Advanced ISBN Scanner</title>
-  <script src="https://unpkg.com/html5-qrcode"></script>
+  <script src="https://unpkg.com/@zxing/browser@latest"></script>
+  <script src="https://unpkg.com/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
   <style>
-    :root {
-      --primary: #2196F3;
-      --success: #4CAF50;
-      --danger: #f44336;
-      --warning: #FFC107;
-      --dark: #333;
-      --light: #f8f9fa;
-      --gray: #6c757d;
-    }
-    
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-    
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      line-height: 1.6;
-      color: var(--dark);
-      background: linear-gradient(135deg, #f5f7fa 0%, #e4e8f0 100%);
-      min-height: 100vh;
-      padding: 20px;
-      max-width: 1000px;
-      margin: 0 auto;
-    }
-    
-    .container {
-      background: white;
-      border-radius: 12px;
-      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
-      overflow: hidden;
-      margin-bottom: 30px;
-    }
-    
-    header {
-      background: linear-gradient(135deg, var(--primary) 0%, #1976D2 100%);
-      color: white;
-      padding: 25px;
-      text-align: center;
-      position: relative;
-    }
-    
-    h1 {
-      font-size: 2.2rem;
-      margin-bottom: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 12px;
-    }
-    
-    .subtitle {
-      font-weight: 300;
-      opacity: 0.9;
-      font-size: 1.1rem;
-      max-width: 600px;
-      margin: 0 auto;
-    }
-    
-    .card {
-      padding: 25px;
-      border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-    }
-    
-    .card-title {
-      font-size: 1.3rem;
-      margin-bottom: 15px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      color: var(--primary);
-    }
-    
-    .card-title i {
-      font-size: 1.5rem;
-    }
-    
-    #video-container {
-      position: relative;
-      width: 100%;
-      height: 0;
-      padding-bottom: 75%; /* 4:3 aspect ratio */
-      background: #000;
-      border-radius: 8px;
-      overflow: hidden;
-      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
-      margin-bottom: 20px;
-    }
-    
-    #video, #canvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-    
-    #canvas {
-      display: none;
-    }
-    
-    .buttons {
-      display: flex;
-      gap: 15px;
-      margin-top: 20px;
-    }
-    
-    button {
-      flex: 1;
-      padding: 14px;
-      font-size: 1.05rem;
-      font-weight: 600;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-      transition: all 0.3s ease;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-    
-    button:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
-    }
-    
-    button:active {
-      transform: translateY(1px);
-    }
-    
-    #shutter {
-      background: var(--success);
-      color: white;
-    }
-    
-    #clear {
-      background: var(--danger);
-      color: white;
-    }
-    
-    #status {
-      padding: 15px;
-      border-radius: 8px;
-      margin-top: 20px;
-      display: none;
-      font-weight: 500;
-    }
-    
-    .success {
-      background: rgba(76, 175, 80, 0.15);
-      color: #2E7D32;
-      border-left: 4px solid var(--success);
-    }
-    
-    .error {
-      background: rgba(244, 67, 54, 0.15);
-      color: #C62828;
-      border-left: 4px solid var(--danger);
-    }
-    
-    #list {
-      margin-top: 20px;
-      max-height: 300px;
-      overflow-y: auto;
-      border: 1px solid #e0e0e0;
-      border-radius: 8px;
-      padding: 10px;
-      background: var(--light);
-    }
-    
-    .isbn-line {
-      padding: 12px;
-      background: white;
-      border-radius: 6px;
-      margin-bottom: 10px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-      transition: all 0.2s;
-      border-left: 4px solid var(--primary);
-    }
-    
-    .isbn-line:hover {
-      transform: translateX(5px);
-      box-shadow: 0 4px 8px rgba(0,0,0,0.08);
-      background: #e3f2fd;
-    }
-    
-    .isbn-text {
-      font-family: 'Courier New', monospace;
-      font-weight: 600;
-      color: var(--dark);
-    }
-    
-    .book-title {
-      font-size: 0.95rem;
-      color: var(--gray);
-      margin-top: 5px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 100%;
-    }
-    
-    .isbn-actions {
-      display: flex;
-      gap: 8px;
-    }
-    
-    .copy-btn, .delete-btn {
-      padding: 6px 10px;
-      border-radius: 4px;
-      font-size: 0.85rem;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    
-    .copy-btn {
-      background: rgba(33, 150, 243, 0.1);
-      color: var(--primary);
-      border: 1px solid rgba(33, 150, 243, 0.3);
-    }
-    
-    .copy-btn:hover {
-      background: rgba(33, 150, 243, 0.2);
-    }
-    
-    .delete-btn {
-      background: rgba(244, 67, 54, 0.1);
-      color: var(--danger);
-      border: 1px solid rgba(244, 67, 54, 0.3);
-    }
-    
-    .delete-btn:hover {
-      background: rgba(244, 67, 54, 0.2);
-    }
-    
-    #isbns {
-      width: 100%;
-      min-height: 150px;
-      padding: 15px;
-      font-family: 'Courier New', monospace;
-      border-radius: 8px;
-      border: 1px solid #e0e0e0;
-      background: var(--light);
-      margin-top: 15px;
-      resize: vertical;
-    }
-    
-    .stats {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 20px;
-      background: rgba(33, 150, 243, 0.05);
-      padding: 15px;
-      border-radius: 8px;
-      font-weight: 500;
-    }
-    
-    .stat-item {
-      text-align: center;
-      flex: 1;
-    }
-    
-    .stat-value {
-      font-size: 1.8rem;
-      font-weight: 700;
-      color: var(--primary);
-      line-height: 1.2;
-    }
-    
-    .stat-label {
-      font-size: 0.9rem;
-      color: var(--gray);
-    }
-    
-    footer {
-      text-align: center;
-      padding: 20px;
-      color: var(--gray);
-      font-size: 0.9rem;
-      margin-top: 30px;
-    }
-    
-    @media (max-width: 768px) {
-      .buttons {
-        flex-direction: column;
-      }
-      
-      .stats {
-        flex-direction: column;
-        gap: 15px;
-      }
-      
-      h1 {
-        font-size: 1.8rem;
-      }
-    }
+    body { font-family: sans-serif; padding: 1em; background: #f4f4f4; max-width: 600px; margin: auto; text-align: center; }
+    video, canvas { width: 100%; max-width: 100%; margin-top: 1em; border: 1px solid #ccc; }
+    button { padding: 1em; font-size: 1em; width: 100%; margin-top: 1em; background-color: #4CAF50; color: white; border: none; cursor: pointer; }
+    button:hover { background-color: #45a049; }
+    #status { margin-top: 1em; padding: 0.5em; display: none; }
+    .success { background-color: #dff0d8; color: #3c763d; }
+    .error { background-color: #f2dede; color: #a94442; }
+    #isbnResult { margin-top: 1em; font-weight: bold; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1><span>📚</span> Advanced ISBN Scanner</h1>
-      <p class="subtitle">Scan book barcodes to extract ISBNs and retrieve book information</p>
-    </header>
-    
-    <div class="card">
-      <h2 class="card-title"><i>📷</i> Camera Scanner</h2>
-      <div id="video-container">
-        <video id="video" autoplay muted playsinline></video>
-        <canvas id="canvas" style="display:none;"></canvas>
-      </div>
-      
-      <div class="buttons">
-        <button id="shutter">
-          <span>📸</span> Capture ISBN
-        </button>
-        <button id="clear">
-          <span>🗑</span> Clear List
-        </button>
-      </div>
-      
-      <div id="status"></div>
-    </div>
-    
-    <div class="card">
-      <h2 class="card-title"><i>📚</i> Detected Books</h2>
-      <div class="stats">
-        <div class="stat-item">
-          <div class="stat-value" id="totalCount">0</div>
-          <div class="stat-label">Books Scanned</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-value" id="uniqueCount">0</div>
-          <div class="stat-label">Unique ISBNs</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-value" id="lastScanned">-</div>
-          <div class="stat-label">Last Scanned</div>
-        </div>
-      </div>
-      
-      <div id="list"></div>
-    </div>
-    
-    <div class="card">
-      <h2 class="card-title"><i>📋</i> ISBN List</h2>
-      <textarea id="isbns" rows="6" placeholder="Scanned ISBNs will appear here..." readonly></textarea>
-      <div class="buttons">
-        <button id="copyBtn" style="background: var(--primary); color: white;">
-          <span>📋</span> Copy ISBNs to Clipboard
-        </button>
-        <button id="emailBtn" style="background: var(--success); color: white;">
-          <span>✉️</span> Email ISBNs
-        </button>
-      </div>
-    </div>
-  </div>
-  
-  <footer>
-    <p>Advanced ISBN Scanner &copy; 2023 | Uses Google Books API for book information</p>
-  </footer>
+  <h1>📚 ISBN Capture</h1>
+
+  <video id="video" autoplay muted playsinline></video>
+  <canvas id="canvas" style="display:none;"></canvas>
+  <button id="shutter">📸 Capture & Detect ISBN</button>
+
+  <div id="status"></div>
+  <div id="isbnResult"></div>
 
   <script>
-    // State management
-    const detected = new Map();
-    let scanningActive = true;
-    let html5qr = null;
-    
-    // DOM Elements
     const video = document.getElementById("video");
     const canvas = document.getElementById("canvas");
-    const statusEl = document.getElementById("status");
-    const listEl = document.getElementById("list");
-    const isbnsEl = document.getElementById("isbns");
-    const totalCountEl = document.getElementById("totalCount");
-    const uniqueCountEl = document.getElementById("uniqueCount");
-    const lastScannedEl = document.getElementById("lastScanned");
-    
-    // Initialize the app
-    async function initApp() {
-      await initCamera();
-      updateStats();
+    const statusDiv = document.getElementById("status");
+    const resultDiv = document.getElementById("isbnResult");
+
+    function showStatus(msg, isError = false) {
+      statusDiv.textContent = msg;
+      statusDiv.className = isError ? 'error' : 'success';
+      statusDiv.style.display = 'block';
     }
-    
-    // Initialize camera
+
+    function cleanISBN(text) {
+      const match = text.match(/(?:ISBN[- ]*13[: ]*)?([0-9]{13})|(?:ISBN[- ]*10[: ]*)?([0-9X]{10})/i);
+      if (!match) return null;
+      return match[1] || match[2];
+    }
+
     async function initCamera() {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { facingMode: "environment" } 
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" }
         });
         video.srcObject = stream;
-        
-        // Initialize the QR scanner
-        html5qr = new Html5Qrcode(/* dummy */ "reader");
-        
-        showStatus("Camera initialized. Ready to scan books!", false);
+        showStatus("Camera ready");
       } catch (e) {
-        showStatus("Camera access denied. Please enable camera permissions to use the scanner.", true);
-        console.error("Camera initialization error:", e);
+        showStatus("Camera access denied.", true);
+        console.error(e);
       }
     }
-    
-    // Show status message
-    function showStatus(msg, isError = false) {
-      statusEl.textContent = msg;
-      statusEl.className = isError ? "error" : "success";
-      statusEl.style.display = "block";
-      
-      setTimeout(() => {
-        statusEl.style.display = "none";
-      }, 5000);
-    }
-    
-    // Improved ISBN extraction function
-    function extractISBNs(text) {
-      // Enhanced ISBN regex pattern to match ISBN-10 and ISBN-13 with hyphens
-      const isbnPattern = /\b(?:ISBN(?:-1[03])?:?\s*)?(?=[0-9X]{10,13}\b|(?=(?:[0-9]+[-\s]){3,4}[-\s]*[0-9X]{1,5}\b)(?:97[89][-\s]?)?[0-9]{1,5}[-\s]?[0-9]+[-\s]?[0-9]+[-\s]?[0-9X]\b/g;
-      
-      // Find all ISBN matches
-      const matches = text.match(isbnPattern) || [];
-      
-      // Clean and validate ISBNs
-      return matches.map(isbn => {
-        // Remove non-alphanumeric characters except X
-        let cleaned = isbn.replace(/[^0-9X]/gi, '');
-        
-        // Convert to uppercase for consistency
-        cleaned = cleaned.toUpperCase();
-        
-        // Validate ISBN length
-        if (cleaned.length === 10 || cleaned.length === 13) {
-          return cleaned;
-        }
-        
-        return null;
-      }).filter(isbn => isbn !== null);
-    }
-    
-    // Look up book information by ISBN
-    async function lookupBookInfo(isbn) {
-      try {
-        const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`);
-        const data = await res.json();
-        
-        if (data.items?.length) {
-          const bookInfo = data.items[0].volumeInfo;
-          return {
-            title: bookInfo.title || "Unknown Title",
-            authors: bookInfo.authors ? bookInfo.authors.join(", ") : "Unknown Author",
-            thumbnail: bookInfo.imageLinks?.thumbnail || ""
-          };
-        }
-      } catch (error) {
-        console.error("Book lookup error:", error);
-      }
-      return null;
-    }
-    
-    // Capture ISBN from camera
+
     document.getElementById("shutter").onclick = async () => {
-      if (!html5qr) {
-        showStatus("Scanner not initialized. Trying to initialize...", true);
-        await initCamera();
-        return;
-      }
-      
+      showStatus("Capturing...");
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       const ctx = canvas.getContext("2d");
       ctx.drawImage(video, 0, 0);
-      
-      canvas.toBlob(async blob => {
-        try {
-          const result = await html5qr.scanFileV2(blob, true);
-          const found = extractISBNs(result.decodedText || "");
-          
-          if (!found.length) {
-            showStatus("No ISBN detected. Try again with better lighting.", true);
-            return;
-          }
-          
-          let newISBNs = 0;
-          
-          for (const isbn of found) {
-            if (detected.has(isbn)) continue;
-            
-            // Add ISBN immediately with placeholder info
-            detected.set(isbn, { 
-              title: "Fetching title...", 
-              timestamp: new Date().toLocaleTimeString(),
-              rawText: result.decodedText
-            });
-            
-            newISBNs++;
-            
-            // Look up book info in the background
-            setTimeout(async () => {
-              const bookInfo = await lookupBookInfo(isbn);
-              
-              if (bookInfo) {
-                detected.set(isbn, {
-                  title: bookInfo.title,
-                  authors: bookInfo.authors,
-                  thumbnail: bookInfo.thumbnail,
-                  timestamp: new Date().toLocaleTimeString(),
-                  rawText: result.decodedText
-                });
-              } else {
-                detected.set(isbn, { 
-                  title: "Title not found", 
-                  timestamp: new Date().toLocaleTimeString(),
-                  rawText: result.decodedText
-                });
-              }
-              
-              renderList();
-            }, 100);
-          }
-          
-          renderList();
-          updateStats();
-          
-          if (newISBNs > 0) {
-            showStatus(`Found ${newISBNs} new ISBN${newISBNs > 1 ? 's' : ''}!`, false);
-          } else {
-            showStatus("All ISBNs already in the list.", true);
-          }
-          
-        } catch (e) {
-          showStatus("Scan failed: " + e.message, true);
+
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.95));
+      const imageUrl = URL.createObjectURL(blob);
+
+      // Try barcode first
+      try {
+        const codeReader = new ZXing.BrowserMultiFormatReader();
+        const result = await codeReader.decodeFromImageUrl(imageUrl);
+        const isbn = cleanISBN(result.text);
+        if (isbn) {
+          resultDiv.textContent = `📦 ISBN (Barcode): ${isbn}`;
+          showStatus("ISBN found via barcode ✅");
+          return;
         }
-      }, "image/jpeg", 0.9);
-    };
-    
-    // Render the book list
-    function renderList() {
-      listEl.innerHTML = "";
-      
-      if (detected.size === 0) {
-        listEl.innerHTML = `<div class="isbn-line" style="text-align:center;color:var(--gray);">No books scanned yet</div>`;
-        return;
+      } catch (err) {
+        console.log("Barcode scan failed, falling back to OCR...");
       }
-      
-      // Convert to array and sort by timestamp (newest first)
-      const sortedEntries = [...detected.entries()].sort((a, b) => {
-        return new Date(b[1].timestamp) - new Date(a[1].timestamp);
-      });
-      
-      for (const [isbn, info] of sortedEntries) {
-        const div = document.createElement("div");
-        div.className = "isbn-line";
-        div.innerHTML = `
-          <div>
-            <div class="isbn-text">${isbn}</div>
-            <div class="book-title">${info.title}</div>
-            ${info.authors ? `<div class="book-title">${info.authors}</div>` : ''}
-            <div class="book-title" style="font-size:0.8rem;color:#999;">
-              Scanned at ${info.timestamp}
-            </div>
-          </div>
-          <div class="isbn-actions">
-            <button class="copy-btn" data-isbn="${isbn}">Copy</button>
-            <button class="delete-btn" data-isbn="${isbn}">✕</button>
-          </div>
-        `;
-        listEl.appendChild(div);
-      }
-      
-      // Add event listeners for action buttons
-      document.querySelectorAll(".copy-btn").forEach(btn => {
-        btn.onclick = (e) => {
-          const isbn = e.target.getAttribute("data-isbn");
-          navigator.clipboard.writeText(isbn);
-          showStatus(`ISBN ${isbn} copied to clipboard!`, false);
-          e.stopPropagation();
-        };
-      });
-      
-      document.querySelectorAll(".delete-btn").forEach(btn => {
-        btn.onclick = (e) => {
-          const isbn = e.target.getAttribute("data-isbn");
-          detected.delete(isbn);
-          renderList();
-          updateTextArea();
-          updateStats();
-          showStatus(`ISBN ${isbn} removed`, false);
-          e.stopPropagation();
-        };
-      });
-      
-      updateTextArea();
-    }
-    
-    // Update the textarea with ISBNs
-    function updateTextArea() {
-      const isbnsArray = Array.from(detected.keys());
-      isbnsEl.value = isbnsArray.join("\n");
-    }
-    
-    // Update statistics
-    function updateStats() {
-      totalCountEl.textContent = detected.size;
-      uniqueCountEl.textContent = detected.size; // All are unique in the Map
-      
-      if (detected.size > 0) {
-        const lastEntry = [...detected.entries()].reduce((latest, [isbn, info]) => {
-          return new Date(info.timestamp) > new Date(latest.timestamp) ? {isbn, ...info} : latest;
-        }, {timestamp: 0});
-        
-        lastScannedEl.textContent = lastEntry.isbn.substring(0, 6) + "...";
-        lastScannedEl.title = lastEntry.isbn;
-      } else {
-        lastScannedEl.textContent = "-";
-      }
-    }
-    
-    // Clear the list
-    document.getElementById("clear").onclick = () => {
-      if (detected.size === 0) {
-        showStatus("The list is already empty", true);
-        return;
-      }
-      
-      if (confirm("Are you sure you want to clear all scanned ISBNs?")) {
-        detected.clear();
-        renderList();
-        updateStats();
-        showStatus("All ISBNs cleared", false);
+
+      // OCR fallback
+      try {
+        showStatus("Trying OCR...");
+        const { data: { text } } = await Tesseract.recognize(blob, 'eng');
+        const isbn = cleanISBN(text);
+        if (isbn) {
+          resultDiv.textContent = `🔍 ISBN (OCR): ${isbn}`;
+          showStatus("ISBN found via OCR ✅");
+        } else {
+          resultDiv.textContent = "❌ No valid ISBN found. Please rescan.";
+          showStatus("No ISBN found. Try again.", true);
+        }
+      } catch (ocrErr) {
+        showStatus("OCR failed.", true);
+        console.error(ocrErr);
       }
     };
-    
-    // Copy ISBNs to clipboard
-    document.getElementById("copyBtn").onclick = () => {
-      if (detected.size === 0) {
-        showStatus("No ISBNs to copy", true);
-        return;
-      }
-      
-      navigator.clipboard.writeText(isbnsEl.value)
-        .then(() => showStatus(`${detected.size} ISBNs copied to clipboard!`, false))
-        .catch(() => showStatus("Failed to copy ISBNs", true));
-    };
-    
-    // Email ISBNs
-    document.getElementById("emailBtn").onclick = () => {
-      if (detected.size === 0) {
-        showStatus("No ISBNs to email", true);
-        return;
-      }
-      
-      const subject = "Scanned ISBNs List";
-      const body = "Here are the ISBNs I scanned:\n\n" + isbnsEl.value;
-      
-      const mailtoLink = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-      window.location.href = mailtoLink;
-    };
-    
-    // Initialize when page loads
-    window.onload = initApp;
+
+    window.onload = initCamera;
   </script>
 </body>
 </html>
