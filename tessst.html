@@ -2,58 +2,132 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>📚 ISBN Barcode Scanner</title>
+  <title>📚 Enhanced ISBN Scanner</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="https://unpkg.com/html5-qrcode"></script>
+  <style>
+    body { font-family: Arial; max-width: 600px; margin: auto; padding: 1em; background: #f9f9f9; }
+    #reader, video { width:100%; }
+    .buttons, button { width:48%; margin:1%; padding:0.8em; font-size:1em; box-sizing:border-box; }
+    button { cursor:pointer; }
+    #shutter { background:#2196F3; color:#fff; border:none; transition:.3s; }
+    #shutter:hover { background:#1976D2; }
+    .isbn-line { margin:0.2em 0; padding:0.5em; background:#fff; border:1px solid #ddd; cursor:pointer; }
+    .isbn-line:hover { background:#e0f7fa; }
+    #status { margin-top:1em; padding:0.5em; display:none; }
+    .success { background:#dff0d8; color:#3c763d; }
+    .error { background:#f2dede; color:#a94442; }
+  </style>
 </head>
 <body>
-  <h2>Scan ISBN Barcode (EAN-13)</h2>
-  <div id="reader" style="width: 300px;"></div>
-  <p id="result"></p>
 
-  <script>
-    function cleanISBN(code) {
-      return code.replace(/[^0-9X]/gi, '').toUpperCase();
+<h1>📚 Enhanced ISBN Scanner</h1>
+<div id="reader"></div>
+
+<div class="buttons">
+  <button id="shutter">📸 Capture Book</button>
+  <button id="clear">🗑 Clear List</button>
+</div>
+
+<div id="status"></div>
+
+<h2>Detected ISBNs:</h2>
+<div id="list"></div>
+
+<textarea id="isbns" rows="6" placeholder="Scanned ISBNs appear here..." readonly></textarea>
+
+<script>
+const detected = new Map();
+const reader = new Html5Qrcode("reader");
+
+function showStatus(msg, err=false) {
+  const el = document.getElementById("status");
+  el.textContent = msg;
+  el.className = err ? "error" : "success";
+  el.style.display = "block";
+  setTimeout(() => el.style.display="none", 3000);
+}
+
+async function startCamera() {
+  try {
+    const cams = await Html5Qrcode.getCameras();
+    if (!cams.length) throw "No camera found";
+    await reader.start(
+      { facingMode:"environment" },
+      { fps:10, qrbox:{width:300,height:200} },
+      () => {}, () => {}
+    );
+  } catch (e) {
+    showStatus("Camera failed: "+e, true);
+  }
+}
+
+function extractISBNs(text) {
+  return Array.from(new Set(
+    (text.match(/\b97[89][0-9]{10,12}\b/g) || [])
+  ));
+}
+
+async function lookup(isbn) {
+  try {
+    const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`);
+    const { items } = await res.json();
+    if (items && items.length) return items[0].volumeInfo.title;
+  } catch(e){}
+  return null;
+}
+
+document.getElementById("shutter").onclick = async () => {
+  try {
+    const img = await reader.takePhoto();
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    canvas.width = img.width; canvas.height = img.height;
+    ctx.drawImage(img,0,0);
+    const data = ctx.getImageData(0,0,img.width,img.height);
+    const codes = extractISBNs(data); // using imageData.text is not possible; skip
+    // Instead use reader.scanFile
+    const file = await fetch(canvas.toDataURL()).then(res=>res.blob());
+    const result = await reader.scanFileV2(file, true);
+    const found = extractISBNs(result.decodedText || "");
+    if (!found.length) throw "No ISBN found. Try again.";
+    
+    for (const isbn of found) {
+      if (detected.has(isbn)) continue;
+      const title = await lookup(isbn);
+      detected.set(isbn, title || "rescan");
+      renderList();
     }
+  } catch (e) {
+    showStatus("Scan failed: "+e, true);
+  }
+};
 
-    function isValidISBN(code) {
-      const cleaned = cleanISBN(code);
-      return cleaned.length === 13 && cleaned.startsWith("978");
-    }
+function renderList() {
+  const listEl = document.getElementById("list");
+  listEl.innerHTML = "";
+  detected.forEach((title, isbn) => {
+    const div = document.createElement("div");
+    div.className = "isbn-line";
+    div.textContent = `${isbn}\t${title}`;
+    div.onclick = () => {
+      const ta = document.getElementById("isbns");
+      ta.value += div.textContent + "\n";
+      showStatus("Added "+isbn);
+    };
+    listEl.appendChild(div);
+  });
+}
 
-    const resultElem = document.getElementById("result");
+document.getElementById("clear").onclick = () => {
+  detected.clear();
+  renderList();
+  document.getElementById("isbns").value = "";
+  showStatus("Cleared list");
+};
 
-    const html5QrCode = new Html5Qrcode("reader");
+window.onload = startCamera;
+</script>
 
-    Html5Qrcode.getCameras().then(devices => {
-      if (devices.length === 0) {
-        resultElem.innerText = "No camera found.";
-        return;
-      }
-
-      const cameraId = devices[0].id;
-      html5QrCode.start(
-        { facingMode: "environment" },
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 150 },
-          formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13]
-        },
-        (decodedText) => {
-          const cleaned = cleanISBN(decodedText);
-          if (isValidISBN(cleaned)) {
-            resultElem.innerText = "✅ ISBN Detected: " + cleaned;
-            html5QrCode.stop();
-          } else {
-            resultElem.innerText = "❌ Not a valid ISBN";
-          }
-        },
-        (err) => {
-          console.log("Scan error:", err);
-        }
-      );
-    }).catch(err => {
-      resultElem.innerText = "Camera error: " + err;
-    });
-  </script>
 </body>
 </html>
