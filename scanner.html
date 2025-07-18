@@ -1,4 +1,3 @@
-<!DOCTYPE html>
 <html>
 <head>
   <title>📚 ISBN Scanner</title>
@@ -9,24 +8,64 @@
       font-family: Arial, sans-serif;
       padding: 1em;
       background: #f9f9f9;
+      max-width: 600px;
+      margin: 0 auto;
     }
     input, textarea, button {
       width: 100%;
       margin-top: 1em;
       padding: 0.8em;
       font-size: 1em;
+      box-sizing: border-box;
     }
     button {
       background-color: #4CAF50;
       color: white;
       border: none;
       cursor: pointer;
+      transition: background-color 0.3s;
     }
     button:hover {
       background-color: #45a049;
     }
+    button.secondary {
+      background-color: #f44336;
+      margin-top: 0.5em;
+    }
+    button.secondary:hover {
+      background-color: #d32f2f;
+    }
     h1 {
       text-align: center;
+    }
+    #status {
+      margin-top: 1em;
+      padding: 0.8em;
+      text-align: center;
+      display: none;
+    }
+    .success {
+      background-color: #dff0d8;
+      color: #3c763d;
+    }
+    .error {
+      background-color: #f2dede;
+      color: #a94442;
+    }
+    .scan-feedback {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(76, 175, 80, 0.5);
+      display: none;
+      z-index: 10;
+    }
+    #reader {
+      position: relative;
+      width: 100%;
+      margin-top: 20px;
     }
   </style>
 </head>
@@ -37,42 +76,124 @@
   <label for="email">📧 Enter Your Email:</label>
   <input type="email" id="email" placeholder="yourname@example.com" required>
 
-  <div id="reader" style="width:100%; margin-top: 20px;"></div>
+  <div id="reader">
+    <div class="scan-feedback" id="scanFeedback"></div>
+  </div>
 
-  <label for="isbns">📋 Scanned ISBNs:</label>
+  <div id="status"></div>
+
+  <label for="isbns">📋 Scanned ISBNs (Count: <span id="count">0</span>):</label>
   <textarea id="isbns" rows="6" placeholder="Scan ISBNs here..." readonly></textarea>
 
   <button id="send">Send ISBNs via Email</button>
+  <button id="clear" class="secondary">Clear List</button>
 
   <script>
     const isbns = new Set();
+    let scanner = null;
 
-    function onScanSuccess(decodedText, decodedResult) {
-      if (!isbns.has(decodedText)) {
-        isbns.add(decodedText);
-        document.getElementById('isbns').value = [...isbns].join('\n');
-      }
+    function cleanISBN(isbn) {
+      // Remove non-digit characters except 'X' (for ISBN-10)
+      return isbn.replace(/[^0-9X]/gi, '').toUpperCase();
     }
 
-    const html5QrcodeScanner = new Html5QrcodeScanner(
-      "reader", { fps: 10, qrbox: 250 }
-    );
-    html5QrcodeScanner.render(onScanSuccess);
+    function isValidISBN(isbn) {
+      // Basic validation for ISBN-10 and ISBN-13
+      const cleaned = cleanISBN(isbn);
+      return cleaned.length === 10 || cleaned.length === 13;
+    }
+
+    function showStatus(message, isError = false) {
+      const statusEl = document.getElementById('status');
+      statusEl.textContent = message;
+      statusEl.className = isError ? 'error' : 'success';
+      statusEl.style.display = 'block';
+      
+      setTimeout(() => {
+        statusEl.style.display = 'none';
+      }, 3000);
+    }
+
+    function showScanFeedback() {
+      const feedback = document.getElementById('scanFeedback');
+      feedback.style.display = 'block';
+      setTimeout(() => {
+        feedback.style.display = 'none';
+      }, 300);
+    }
+
+    function updateCounter() {
+      document.getElementById('count').textContent = isbns.size;
+    }
+
+    async function onScanSuccess(decodedText) {
+      const cleanedISBN = cleanISBN(decodedText);
+      
+      if (!isValidISBN(cleanedISBN)) {
+        showStatus(`Invalid ISBN: ${decodedText}`, true);
+        return;
+      }
+      
+      if (isbns.has(cleanedISBN)) {
+        showStatus(`Duplicate ISBN: ${cleanedISBN}`, true);
+        return;
+      }
+
+      isbns.add(cleanedISBN);
+      document.getElementById('isbns').value = [...isbns].join('\n');
+      updateCounter();
+      showScanFeedback();
+    }
+
+    function initScanner() {
+      scanner = new Html5QrcodeScanner(
+        "reader", 
+        { 
+          fps: 10, 
+          qrbox: { width: 250, height: 150 },
+          formatsToSupport: [ Html5QrcodeSupportedFormats.EAN_13 ]
+        }
+      );
+      scanner.render(onScanSuccess);
+    }
 
     document.getElementById('send').onclick = () => {
       const email = document.getElementById('email').value.trim();
       const list = document.getElementById('isbns').value.trim();
 
-      if (!email) return alert("Please enter your email address.");
-      if (!list) return alert("No ISBNs scanned.");
+      if (!email) {
+        showStatus("Please enter your email address.", true);
+        return;
+      }
+      
+      // Basic email validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        showStatus("Please enter a valid email address.", true);
+        return;
+      }
+
+      if (!list) {
+        showStatus("No ISBNs scanned.", true);
+        return;
+      }
 
       const subject = encodeURIComponent("Scanned ISBNs");
-      const body = encodeURIComponent(list);
+      const body = encodeURIComponent(`Scanned ISBNs:\n\n${list}\n\nTotal: ${isbns.size}`);
       const mailtoLink = `mailto:${email}?subject=${subject}&body=${body}`;
 
       window.location.href = mailtoLink;
     };
-  </script>
 
+    document.getElementById('clear').onclick = () => {
+      isbns.clear();
+      document.getElementById('isbns').value = '';
+      updateCounter();
+      showStatus("List cleared successfully");
+    };
+
+    // Initialize scanner when page loads
+    window.onload = initScanner;
+  </script>
 </body>
 </html>
