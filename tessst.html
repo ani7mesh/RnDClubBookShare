@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>📚 ISBN Barcode Scanner</title>
+  <script src="https://unpkg.com/html5-qrcode"></script>
+</head>
+<body>
+  <h2>Scan ISBN Barcode (EAN-13)</h2>
+  <div id="reader" style="width: 300px;"></div>
+  <p id="result"></p>
+
+  <script>
+    function cleanISBN(code) {
+      return code.replace(/[^0-9X]/gi, '').toUpperCase();
+    }
+
+    function isValidISBN(code) {
+      const cleaned = cleanISBN(code);
+      return cleaned.length === 13 && cleaned.startsWith("978");
+    }
+
+    const resultElem = document.getElementById("result");
+
+    const html5QrCode = new Html5Qrcode("reader");
+
+    Html5Qrcode.getCameras().then(devices => {
+      if (devices.length === 0) {
+        resultElem.innerText = "No camera found.";
+        return;
+      }
+
+      const cameraId = devices[0].id;
+      html5QrCode.start(
+        { facingMode: "environment" },
+        {
+          fps: 10,
+          qrbox: { width: 250, height: 150 },
+          formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13]
+        },
+        (decodedText) => {
+          const cleaned = cleanISBN(decodedText);
+          if (isValidISBN(cleaned)) {
+            resultElem.innerText = "✅ ISBN Detected: " + cleaned;
+            html5QrCode.stop();
+          } else {
+            resultElem.innerText = "❌ Not a valid ISBN";
+          }
+        },
+        (err) => {
+          console.log("Scan error:", err);
+        }
+      );
+    }).catch(err => {
+      resultElem.innerText = "Camera error: " + err;
+    });
+  </script>
+</body>
+</html>
