@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>📚 ISBN Capture (Multi-Method)</title>
+  <title>📚 ISBN Capture (Smart OCR + Barcode)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="https://unpkg.com/@zxing/browser@latest"></script>
   <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
@@ -64,7 +64,7 @@
   <button id="shutter">📸 Capture & Detect ISBN</button>
 
   <div id="status"></div>
-  <textarea id="isbnText" placeholder="Detected ISBNs will appear here..."></textarea>
+  <textarea id="isbnText" placeholder="Detected ISBNs and Titles..."></textarea>
 
   <button id="sendEmail">📧 Send to Email</button>
 
@@ -79,6 +79,20 @@
       statusDiv.textContent = msg;
       statusDiv.className = isError ? 'error' : 'success';
       statusDiv.style.display = 'block';
+    }
+
+    function extractISBNRightOfKeyword(text) {
+      const lines = text.split('\n');
+      for (let line of lines) {
+        if (/ISBN/i.test(line)) {
+          const parts = line.split(/ISBN(?:-13)?:?/i);
+          if (parts.length > 1) {
+            const possible = parts[1].match(/[0-9]{10,13}[\dX]/);
+            if (possible) return possible[0];
+          }
+        }
+      }
+      return null;
     }
 
     function cleanISBN(text) {
@@ -127,10 +141,12 @@
         console.log("ZXing failed", e);
       }
 
-      // 3️⃣ Try OCR
+      // 3️⃣ Smart OCR
       try {
         const { data: { text } } = await Tesseract.recognize(blob, 'eng');
-        return cleanISBN(text);
+        const directionalISBN = extractISBNRightOfKeyword(text);
+        if (directionalISBN) return directionalISBN;
+        return cleanISBN(text); // fallback to raw scan
       } catch (err) {
         console.error("OCR failed", err);
         return null;
@@ -157,8 +173,15 @@
     };
 
     document.getElementById("sendEmail").onclick = () => {
+      const lines = isbnText.value.trim().split("\n");
+      const validISBNs = lines
+        .map(line => line.split("\t"))
+        .filter(([isbn, title]) => title && title.toLowerCase() !== "rescan")
+        .map(([isbn]) => isbn)
+        .join("\n");
+
       const subject = "My Book ISBNs";
-      const body = encodeURIComponent(isbnText.value);
+      const body = encodeURIComponent(validISBNs || "No valid ISBNs found.");
       const mailtoLink = `mailto:?subject=${subject}&body=${body}`;
       window.location.href = mailtoLink;
     };
