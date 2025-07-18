@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Club Entry</title>
+  <style>
+    :root {
+      --accent: #4f46e5;
+      --light: #f9fafb;
+      --border: #e5e7eb;
+      --text: #111827;
+    }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: var(--light);
+      margin: 0;
+      padding: 1.5rem 1rem;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      min-height: 100vh;
+    }
+
+    .card {
+      background: white;
+      padding: 1.5rem;
+      max-width: 400px;
+      width: 100%;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+    }
+
+    h2 {
+      margin-bottom: 1rem;
+      color: var(--accent);
+      font-size: 1.5rem;
+      text-align: center;
+    }
+
+    label {
+      display: block;
+      margin-top: 1rem;
+      margin-bottom: 0.4rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    input, select {
+      width: 100%;
+      padding: 0.6rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 1rem;
+      background: #fff;
+      color: var(--text);
+    }
+
+    button {
+      margin-top: 1.5rem;
+      width: 100%;
+      background: var(--accent);
+      color: white;
+      font-weight: 600;
+      padding: 0.75rem;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.2s ease-in-out;
+    }
+
+    button:hover {
+      background: #4338ca;
+    }
+
+    #message {
+      margin-top: 1rem;
+      text-align: center;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Club Entry</h2>
+    <form id="entryForm">
+      <label for="empId">Employee ID</label>
+      <input type="text" id="empId" required autocomplete="off" />
+
+      <label for="relation">Relation</label>
+      <select id="relation" required>
+        <option value="">Select</option>
+        <option value="Self">Self</option>
+        <option value="Dependent">Dependent</option>
+      </select>
+
+      <div id="depNameDiv" class="hidden">
+        <label for="depName">Dependent Name</label>
+        <input type="text" id="depName" />
+      </div>
+
+      <label for="facility">Facility</label>
+      <select id="facility" required>
+        <option value="">Select</option>
+        <option value="Gym">🏋️ Gym</option>
+        <option value="Table Tennis">🏓 Table Tennis</option>
+        <option value="Carrom">⚪ Carrom</option>
+        <option value="Badminton">🏸 Badminton</option>
+      </select>
+
+      <button type="submit">Submit</button>
+    </form>
+    <p id="message"></p>
+  </div>
+
+  <script>
+    const form = document.getElementById("entryForm");
+    const depDiv = document.getElementById("depNameDiv");
+    const msg = document.getElementById("message");
+
+    document.getElementById("relation").addEventListener("change", function () {
+      depDiv.classList.toggle("hidden", this.value !== "Dependent");
+      if (this.value !== "Dependent") {
+        document.getElementById("depName").value = '';
+      }
+    });
+
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      msg.textContent = "";
+
+      const empId = document.getElementById("empId").value.trim().toUpperCase();
+      const relation = document.getElementById("relation").value;
+      const depName = document.getElementById("depName").value.trim();
+      const facility = document.getElementById("facility").value;
+
+      if (!empId || !relation || !facility || (relation === "Dependent" && !depName)) {
+        msg.textContent = "❌ Please fill all required fields.";
+        return;
+      }
+
+      msg.textContent = "Submitting...";
+
+      fetch("YOUR_WEB_APP_URL", {
+        method: "POST",
+        body: JSON.stringify({
+          empId,
+          relation,
+          dependentName: depName,
+          facility
+        }),
+        headers: { "Content-Type": "application/json" }
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          msg.textContent = "✅ Entry recorded successfully!";
+          form.reset();
+          depDiv.classList.add("hidden");
+        } else {
+          msg.textContent = "❌ " + data.message;
+        }
+      })
+      .catch(() => {
+        msg.textContent = "❌ Submission failed. Try again.";
+      });
+    });
+  </script>
+</body>
+</html>
