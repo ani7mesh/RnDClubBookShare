@@ -1,31 +1,33 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>📚 ISBN Capture</title>
+  <title>📚 ISBN Capture (Barcode + OCR)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://unpkg.com/@zxing/browser@latest"></script>
+  <script src="https://unpkg.com/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
   <style>
     body {
-      font-family: Arial, sans-serif;
+      font-family: sans-serif;
       padding: 1em;
-      background: #f9f9f9;
+      background: #f4f4f4;
       max-width: 600px;
       margin: auto;
       text-align: center;
     }
     video, canvas {
       width: 100%;
-      max-width: 100%;
-      border: 1px solid #ccc;
+      height: 50vh;
       margin-top: 1em;
+      border: 1px solid #ccc;
     }
     button {
       padding: 1em;
       font-size: 1em;
       width: 100%;
+      margin-top: 1em;
       background-color: #4CAF50;
       color: white;
       border: none;
-      margin-top: 1em;
       cursor: pointer;
     }
     button:hover {
@@ -44,28 +46,38 @@
       background-color: #f2dede;
       color: #a94442;
     }
+    #isbnResult {
+      margin-top: 1em;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
-  <h1>📚 ISBN Image Capture</h1>
+  <h1>📚 ISBN Capture</h1>
 
   <video id="video" autoplay muted playsinline></video>
   <canvas id="canvas" style="display:none;"></canvas>
-
-  <button id="shutter">📸 Capture ISBN Image</button>
+  <button id="shutter">📸 Capture & Detect ISBN</button>
 
   <div id="status"></div>
+  <div id="isbnResult"></div>
 
   <script>
     const video = document.getElementById("video");
     const canvas = document.getElementById("canvas");
     const statusDiv = document.getElementById("status");
+    const resultDiv = document.getElementById("isbnResult");
 
     function showStatus(msg, isError = false) {
       statusDiv.textContent = msg;
       statusDiv.className = isError ? 'error' : 'success';
       statusDiv.style.display = 'block';
-      setTimeout(() => statusDiv.style.display = 'none', 4000);
+    }
+
+    function cleanISBN(text) {
+      const match = text.match(/(?:ISBN[- ]*13[: ]*)?([0-9]{13})|(?:ISBN[- ]*10[: ]*)?([0-9X]{10})/i);
+      if (!match) return null;
+      return match[1] || match[2];
     }
 
     async function initCamera() {
@@ -74,29 +86,53 @@
           video: { facingMode: "environment" }
         });
         video.srcObject = stream;
-        showStatus("Camera initialized. Ready to capture.", false);
+        showStatus("Camera ready");
       } catch (e) {
-        showStatus("Camera access denied. Please enable camera permissions.", true);
+        showStatus("Camera access denied.", true);
         console.error(e);
       }
     }
 
-    document.getElementById("shutter").onclick = () => {
-      if (!video.srcObject) {
-        showStatus("Camera not ready. Please allow camera access.", true);
-        return;
-      }
-
+    document.getElementById("shutter").onclick = async () => {
+      showStatus("Capturing...");
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       const ctx = canvas.getContext("2d");
       ctx.drawImage(video, 0, 0);
 
-      canvas.toBlob(blob => {
-        // At this point you can send the `blob` to OCR/barcode reader
-        showStatus("Image captured. Process with OCR/barcode scanner.", false);
-        // Example: uploadBlobToServer(blob);
-      }, "image/jpeg", 0.9);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, "image/jpeg", 0.95));
+      const imageUrl = URL.createObjectURL(blob);
+
+      // Try barcode first
+      try {
+        const codeReader = new ZXing.BrowserMultiFormatReader();
+        const result = await codeReader.decodeFromImageUrl(imageUrl);
+        const isbn = cleanISBN(result.text);
+        if (isbn) {
+          resultDiv.textContent = `📦 ISBN (Barcode): ${isbn}`;
+          showStatus("ISBN found via barcode ✅");
+          return;
+        }
+      } catch (err) {
+        console.log("Barcode scan failed, falling back to OCR...");
+      }
+
+      // OCR fallback
+      try {
+        showStatus("Trying OCR...");
+        const { data: { text } } = await Tesseract.recognize(blob, 'eng');
+        const isbn = cleanISBN(text);
+        if (isbn) {
+          resultDiv.textContent = `🔍 ISBN (OCR): ${isbn}`;
+          showStatus("ISBN found via OCR ✅");
+        } else {
+          resultDiv.textContent = "❌ No valid ISBN found. Please rescan.";
+          showStatus("No ISBN found. Try again.", true);
+        }
+      } catch (ocrErr) {
+        showStatus("OCR failed.", true);
+        console.error(ocrErr);
+      }
     };
 
     window.onload = initCamera;
