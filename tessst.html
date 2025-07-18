@@ -1,139 +1,105 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>ISBN Scanner</title>
-  <script src="https://unpkg.com/@zxing/library@latest"></script>
+  <title>📚 ISBN Capture</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    body { font-family: Arial, sans-serif; text-align: center; padding: 1em; background: #f7f7f7; }
-    video, canvas { max-width: 100%; margin: 1em 0; }
-    #isbnList { width: 100%; height: 150px; margin-top: 1em; font-family: monospace; }
-    .status { margin-top: 0.5em; font-weight: bold; }
-    button { padding: 10px 20px; font-size: 1em; margin: 10px; }
-    .ok { color: green; }
-    .err { color: red; }
+    body {
+      font-family: Arial, sans-serif;
+      padding: 1em;
+      background: #f9f9f9;
+      max-width: 600px;
+      margin: auto;
+      text-align: center;
+    }
+    video, canvas {
+      width: 100%;
+      max-width: 100%;
+      border: 1px solid #ccc;
+      margin-top: 1em;
+    }
+    button {
+      padding: 1em;
+      font-size: 1em;
+      width: 100%;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      margin-top: 1em;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    #status {
+      margin-top: 1em;
+      padding: 0.5em;
+      display: none;
+    }
+    .success {
+      background-color: #dff0d8;
+      color: #3c763d;
+    }
+    .error {
+      background-color: #f2dede;
+      color: #a94442;
+    }
   </style>
 </head>
 <body>
+  <h1>📚 ISBN Image Capture</h1>
 
-<h2>📚 ISBN/Barcode Scanner</h2>
+  <video id="video" autoplay muted playsinline></video>
+  <canvas id="canvas" style="display:none;"></canvas>
 
-<video id="video" autoplay></video>
-<canvas id="canvas" style="display:none;"></canvas>
+  <button id="shutter">📸 Capture ISBN Image</button>
 
-<br/>
-<button id="start">Start Camera</button>
-<button id="shutter">📸 Capture</button>
+  <div id="status"></div>
 
-<p class="status" id="status"></p>
+  <script>
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const statusDiv = document.getElementById("status");
 
-<textarea id="isbnList" readonly></textarea>
-
-<script>
-  const video = document.getElementById("video");
-  const canvas = document.getElementById("canvas");
-  const statusBox = document.getElementById("status");
-  const isbnList = document.getElementById("isbnList");
-  const detected = new Map();
-
-  const codeReader = new ZXing.BrowserMultiFormatReader();
-
-  function showStatus(msg, isError = false) {
-    statusBox.textContent = msg;
-    statusBox.className = "status " + (isError ? "err" : "ok");
-  }
-
-  async function startCamera() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-        audio: false
-      });
-      video.srcObject = stream;
-      showStatus("Camera started. Ready to scan.");
-    } catch (err) {
-      showStatus("Camera access failed: " + err.message, true);
+    function showStatus(msg, isError = false) {
+      statusDiv.textContent = msg;
+      statusDiv.className = isError ? 'error' : 'success';
+      statusDiv.style.display = 'block';
+      setTimeout(() => statusDiv.style.display = 'none', 4000);
     }
-  }
 
-  async function captureImage() {
-    const width = video.videoWidth;
-    const height = video.videoHeight;
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(video, 0, 0, width, height);
-    return canvas;
-  }
-
-  async function decodeBarcode(canvas) {
-    try {
-      const result = await codeReader.decodeFromCanvas(canvas);
-      return result.text;
-    } catch (err) {
-      return null;
-    }
-  }
-
-  function extractISBN(text) {
-    const matches = text.match(/97[89][- ]?\d{1,5}[- ]?\d{1,7}[- ]?\d{1,7}[- ]?\d/);
-    return matches ? matches[0].replace(/[- ]/g, "") : null;
-  }
-
-  async function lookupBookInfo(isbn) {
-    try {
-      const res = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`);
-      const data = await res.json();
-      if (data.totalItems > 0) {
-        const book = data.items[0].volumeInfo;
-        return book.title || "Untitled";
+    async function initCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" }
+        });
+        video.srcObject = stream;
+        showStatus("Camera initialized. Ready to capture.", false);
+      } catch (e) {
+        showStatus("Camera access denied. Please enable camera permissions.", true);
+        console.error(e);
       }
-    } catch (err) {
-      console.error("Lookup failed:", err);
-    }
-    return null;
-  }
-
-  function updateTextarea() {
-    let out = "";
-    for (const [isbn, title] of detected.entries()) {
-      out += `${isbn}\t${title}\n`;
-    }
-    isbnList.value = out.trim();
-  }
-
-  document.getElementById("start").onclick = startCamera;
-
-  document.getElementById("shutter").onclick = async () => {
-    showStatus("Capturing...");
-    const snap = await captureImage();
-    const raw = await decodeBarcode(snap);
-
-    if (!raw) {
-      showStatus("No barcode detected. Try again.", true);
-      return;
     }
 
-    const isbn = extractISBN(raw);
-    if (!isbn) {
-      showStatus("No ISBN found. Try again.", true);
-      return;
-    }
+    document.getElementById("shutter").onclick = () => {
+      if (!video.srcObject) {
+        showStatus("Camera not ready. Please allow camera access.", true);
+        return;
+      }
 
-    if (detected.has(isbn)) {
-      showStatus("Already scanned this ISBN.", true);
-      return;
-    }
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0);
 
-    showStatus(`ISBN found: ${isbn} – Looking up title...`);
-    const title = await lookupBookInfo(isbn);
-    detected.set(isbn, title || "Rescan");
+      canvas.toBlob(blob => {
+        // At this point you can send the `blob` to OCR/barcode reader
+        showStatus("Image captured. Process with OCR/barcode scanner.", false);
+        // Example: uploadBlobToServer(blob);
+      }, "image/jpeg", 0.9);
+    };
 
-    updateTextarea();
-    showStatus("Book added ✔️");
-  };
-</script>
-
+    window.onload = initCamera;
+  </script>
 </body>
 </html>
