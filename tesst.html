@@ -3,180 +3,204 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>ISBN Scanner</title>
+  <title>ISBN Scanner App</title>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+  <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
   <style>
     body {
       font-family: sans-serif;
       margin: 0;
-      padding: 0;
+      padding: 1em;
+      background: #fefefe;
       text-align: center;
-      background: #f9f9f9;
     }
-    video {
+    video, canvas {
       width: 100%;
-      height: 50vh;
-      object-fit: cover;
+      max-height: 50vh;
+      object-fit: contain;
+      border-radius: 8px;
+    }
+    button, input[type="file"] {
+      margin: 0.5em;
+      padding: 0.6em 1.2em;
+      font-size: 1em;
+      border: none;
+      background: #007bff;
+      color: white;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #0056b3;
     }
     textarea {
-      width: 90%;
+      width: 95%;
       height: 100px;
       margin-top: 1em;
       font-size: 1em;
     }
     #zoomControl {
-      position: absolute;
-      right: 1em;
-      top: 5em;
-      writing-mode: bt-lr;
-      transform: rotate(270deg);
-      height: 200px;
+      width: 90%;
       display: none;
-    }
-    button {
-      margin: 1em;
-      padding: 0.5em 1em;
-      font-size: 1em;
+      margin-top: 1em;
     }
     #status {
-      margin-top: 0.5em;
+      margin-top: 0.8em;
       font-weight: bold;
     }
   </style>
 </head>
 <body>
 
-  <h2>Scan ISBN 📚</h2>
+  <h2>ISBN Scanner 📚</h2>
   <video id="video" autoplay muted playsinline></video>
   <input type="range" id="zoomControl" min="1" max="5" step="0.1" value="1" />
-  <br />
-  <button onclick="captureImage()">📸 Capture</button>
-  <button onclick="manualEntry()">✏️ Manual Entry</button>
-  <p id="status">Camera loading...</p>
 
-  <textarea id="isbnText" readonly placeholder="Captured ISBNs will appear here..."></textarea>
-  <br />
-  <button onclick="sendEmail()">✉️ Send to Email App</button>
+  <div>
+    <button onclick="captureImage()">Capture</button>
+    <button onclick="manualUpload()">Manual Entry</button>
+  </div>
 
-  <input type="file" accept="image/*" id="imageInput" style="display:none" onchange="handleFileUpload(event)"/>
+  <p id="status">Initializing...</p>
+
+  <textarea id="isbnText" placeholder="Detected ISBNs..."></textarea>
+  <br />
+  <button onclick="sendEmail()">Send via Email</button>
+  <input type="file" accept="image/*" id="imageInput" style="display:none" onchange="handleImageUpload(event)" />
+
+  <canvas id="canvas" style="display:none;"></canvas>
 
   <script>
     const video = document.getElementById("video");
     const zoomControl = document.getElementById("zoomControl");
     const isbnText = document.getElementById("isbnText");
+    const canvas = document.getElementById("canvas");
     const imageInput = document.getElementById("imageInput");
     let videoTrack = null;
 
     async function initCamera() {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { facingMode: "environment", zoom: 1 } 
-        });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
         video.srcObject = stream;
         videoTrack = stream.getVideoTracks()[0];
-        const capabilities = videoTrack.getCapabilities();
 
+        const capabilities = videoTrack.getCapabilities();
         if (capabilities.zoom) {
           zoomControl.min = capabilities.zoom.min;
           zoomControl.max = capabilities.zoom.max;
           zoomControl.step = capabilities.zoom.step || 0.1;
           zoomControl.value = capabilities.zoom.min;
           zoomControl.style.display = "block";
-
           zoomControl.oninput = () => {
-            const zoomLevel = parseFloat(zoomControl.value);
-            videoTrack.applyConstraints({ advanced: [{ zoom: zoomLevel }] });
+            videoTrack.applyConstraints({ advanced: [{ zoom: parseFloat(zoomControl.value) }] });
           };
         }
-        showStatus("Camera ready");
-      } catch (err) {
-        console.error(err);
-        showStatus("Camera unavailable. Use manual entry.", true);
+
+        showStatus("Camera ready. Scan a barcode or capture.");
+        initBarcodeScanner();
+      } catch (e) {
+        showStatus("Camera error. Try manual entry.", true);
       }
+    }
+
+    function initBarcodeScanner() {
+      Quagga.init({
+        inputStream: {
+          name: "Live",
+          type: "LiveStream",
+          target: video,
+        },
+        decoder: {
+          readers: ["ean_reader"] // ISBN-13 uses EAN-13 format
+        }
+      }, err => {
+        if (err) return;
+        Quagga.start();
+      });
+
+      Quagga.onDetected(data => {
+        const code = data.codeResult.code;
+        if (/^97\d{11}$/.test(code)) {
+          fetchAllSources(code);
+          showStatus(`ISBN Detected via Barcode: ${code}`);
+        }
+      });
     }
 
     function captureImage() {
-      const canvas = document.createElement("canvas");
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
-      canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
-      showStatus("Processing...");
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      showStatus("Scanning image via OCR...");
+
       Tesseract.recognize(canvas, 'eng').then(({ data: { text } }) => {
-        const found = extractValidISBNs(text);
-        if (found.length) {
-          found.forEach(isbn => {
-            checkOpenLibrary(isbn).then(title => {
-              const result = title ? `${isbn}\t${title}` : `${isbn}\tRESCAN`;
-              appendISBN(result);
-            });
-          });
-        } else {
-          showStatus("No valid ISBN-13 found. Try again or use manual entry.", true);
-        }
+        const matches = extractISBNs(text);
+        if (!matches.length) return showStatus("No valid ISBN-13 found.");
+        matches.forEach(fetchAllSources);
       });
     }
 
-    function extractValidISBNs(text) {
-      const matches = text.match(/\b97[89][\d]{10}\b/g); // strict ISBN-13 match
-      return matches ? Array.from(new Set(matches)) : [];
+    function extractISBNs(text) {
+      return [...new Set(text.match(/\b97[89]\d{10}\b/g))] || [];
+    }
+
+    async function fetchAllSources(isbn) {
+      const existing = isbnText.value;
+      if (existing.includes(isbn)) return;
+
+      const results = [`${isbn}`];
+
+      const gBook = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`).then(r => r.json());
+      const gTitle = gBook.items?.[0]?.volumeInfo?.title;
+      if (gTitle) results.push(`GoogleBooks: ${gTitle}`);
+
+      const openLib = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`).then(r => r.json());
+      const oTitle = openLib[`ISBN:${isbn}`]?.title;
+      if (oTitle) results.push(`OpenLibrary: ${oTitle}`);
+
+      const libThing = await fetch(`https://www.librarything.com/api/thingTitle/${isbn}`).then(r => r.text()).catch(() => null);
+      if (libThing && !libThing.includes('No data')) results.push(`LibraryThing: ${libThing.trim()}`);
+
+      if (results.length === 1) results.push("RESCAN");
+      appendISBN(results.join(" | "));
     }
 
     function appendISBN(entry) {
-      if (!isbnText.value.includes(entry)) {
-        isbnText.value += (isbnText.value ? "\n" : "") + entry;
-      }
-    }
-
-    async function checkOpenLibrary(isbn) {
-      try {
-        const res = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`);
-        const data = await res.json();
-        const details = data[`ISBN:${isbn}`];
-        return details ? details.title : null;
-      } catch {
-        return null;
-      }
+      isbnText.value += (isbnText.value ? "\n" : "") + entry;
     }
 
     function sendEmail() {
-      const validEntries = isbnText.value
-        .split("\n")
-        .filter(line => line.includes("\t") && !line.includes("RESCAN"))
-        .join("\n");
-      const mailto = `mailto:?subject=Scanned ISBNs&body=${encodeURIComponent(validEntries)}`;
-      window.location.href = mailto;
+      const cleanLines = isbnText.value.split("\n").filter(line => !line.includes("RESCAN"));
+      if (!cleanLines.length) return alert("Nothing to send.");
+      const mail = `mailto:?subject=Scanned ISBNs&body=${encodeURIComponent(cleanLines.join("\n"))}`;
+      window.location.href = mail;
     }
 
-    function manualEntry() {
+    function manualUpload() {
       imageInput.click();
     }
 
-    function handleFileUpload(event) {
+    function handleImageUpload(event) {
       const file = event.target.files[0];
       if (!file) return;
-      showStatus("Analyzing image...");
+      showStatus("Processing uploaded image...");
+
       Tesseract.recognize(file, 'eng').then(({ data: { text } }) => {
-        const found = extractValidISBNs(text);
-        if (found.length) {
-          found.forEach(isbn => {
-            checkOpenLibrary(isbn).then(title => {
-              const result = title ? `${isbn}\t${title}` : `${isbn}\tRESCAN`;
-              appendISBN(result);
-            });
-          });
-        } else {
-          showStatus("No valid ISBN-13 found in image.", true);
-        }
+        const matches = extractISBNs(text);
+        if (!matches.length) return showStatus("No valid ISBN-13 found.");
+        matches.forEach(fetchAllSources);
       });
     }
 
-    function showStatus(msg, isError = false) {
-      const status = document.getElementById("status");
-      status.innerText = msg;
-      status.style.color = isError ? "red" : "green";
+    function showStatus(msg, error = false) {
+      const el = document.getElementById("status");
+      el.innerText = msg;
+      el.style.color = error ? "red" : "green";
     }
 
     window.onload = initCamera;
   </script>
+
 </body>
 </html>
