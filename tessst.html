@@ -77,6 +77,7 @@
     const canvas = document.getElementById("canvas");
     const imageInput = document.getElementById("imageInput");
     let videoTrack = null;
+    let isProcessing = false;
 
     async function initCamera() {
       try {
@@ -119,17 +120,27 @@
       });
 
       Quagga.onDetected(data => {
+        if (isProcessing) return;
+
         const code = data.codeResult.code;
         if (/^97\d{11}$/.test(code)) {
-          fetchAllSources(code);
+          isProcessing = true;
+          Quagga.stop(); // prevent further detections
+          fetchAllSources(code).finally(() => {
+            isProcessing = false;
+            Quagga.start(); // resume after processing
+          });
           showStatus(`ISBN Detected via Barcode: ${code}`);
         }
       });
     }
 
     function captureImage() {
+      if (isProcessing) return;
+      isProcessing = true;
       const captureBtn = document.querySelector('button[onclick="captureImage()"]');
       captureBtn.disabled = true;
+      Quagga.stop();
       showStatus("Scanning image via OCR...");
 
       canvas.width = video.videoWidth;
@@ -141,7 +152,9 @@
         const matches = extractISBNs(text);
         if (!matches.length) {
           showStatus("No valid ISBN-13 found.");
+          isProcessing = false;
           captureBtn.disabled = false;
+          Quagga.start();
           return;
         }
 
@@ -149,12 +162,18 @@
         matches.forEach(isbn => {
           fetchAllSources(isbn).finally(() => {
             remaining--;
-            if (remaining === 0) captureBtn.disabled = false;
+            if (remaining === 0) {
+              isProcessing = false;
+              captureBtn.disabled = false;
+              Quagga.start();
+            }
           });
         });
       }).catch(err => {
         showStatus("OCR failed.", true);
+        isProcessing = false;
         captureBtn.disabled = false;
+        Quagga.start();
       });
     }
 
