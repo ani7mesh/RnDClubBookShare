@@ -112,7 +112,7 @@
           target: video,
         },
         decoder: {
-          readers: ["ean_reader"] // ISBN-13 uses EAN-13 format
+          readers: ["ean_reader"]
         }
       }, err => {
         if (err) return;
@@ -121,14 +121,13 @@
 
       Quagga.onDetected(data => {
         if (isProcessing) return;
-
         const code = data.codeResult.code;
         if (/^97\d{11}$/.test(code)) {
           isProcessing = true;
-          Quagga.stop(); // prevent further detections
+          Quagga.stop();
           fetchAllSources(code).finally(() => {
             isProcessing = false;
-            Quagga.start(); // resume after processing
+            Quagga.start();
           });
           showStatus(`ISBN Detected via Barcode: ${code}`);
         }
