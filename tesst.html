@@ -1,127 +1,275 @@
-<!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
+  <title>📚 ISBN Capture</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ISBN Scanner App</title>
+  <!-- Existing APIs -->
+  <script src="https://unpkg.com/@zxing/browser@latest"></script>
+  <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
+  <script src="https://unpkg.com/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+
+  <!-- Extra barcode reader -->
+  <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.2.6/dist/quagga.js"></script>
+
   <style>
-    body { font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #f9f9f9; color: #333; }
-    h2 { margin-bottom: 0.5rem; }
-    #camera { width: 100%; max-height: 50vh; object-fit: contain; background: #000; }
-    #manual-entry { display: none; margin-top: 1rem; }
-    textarea { width: 100%; height: 120px; margin-top: 0.5rem; resize: none; background: #eee; border: none; padding: 0.5rem; font-size: 1rem; }
-    button { padding: 0.5rem 1rem; margin-top: 0.5rem; margin-right: 0.5rem; }
-    .hidden { display: none; }
+    body {
+      font-family: sans-serif;
+      background: #f4f4f4;
+      padding: 1em;
+      max-width: 600px;
+      margin: auto;
+      text-align: center;
+    }
+    video, canvas {
+      width: 100%;
+      height: 50vh;
+      border: 1px solid #ccc;
+      margin-top: 1em;
+    }
+    textarea, input[type="text"] {
+      width: 100%;
+      margin-top: 1em;
+      padding: 0.5em;
+      font-size: 1em;
+    }
+    textarea {
+      height: 120px;
+      resize: none;
+    }
+    button {
+      padding: 1em;
+      font-size: 1em;
+      width: 100%;
+      margin-top: 1em;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    #status {
+      margin-top: 1em;
+      padding: 0.5em;
+      display: none;
+    }
+    .success {
+      background-color: #dff0d8;
+      color: #3c763d;
+    }
+    .error {
+      background-color: #f2dede;
+      color: #a94442;
+    }
   </style>
 </head>
 <body>
-  <h2>ISBN Scanner</h2>
-  <video id="camera" autoplay playsinline></video>
-  <div>
-    <button id="capture-btn">Capture</button>
-    <button id="manual-btn">Manual Entry</button>
-    <button id="send-btn">Send via Email</button>
-  </div>
+  <h1>📚 ISBN Capture</h1>
 
-  <div id="manual-entry">
-    <h3>Detected ISBN(s)</h3>
-    <textarea id="isbn-output" readonly></textarea>
-  </div>
+  <video id="video" autoplay muted playsinline></video>
+  <canvas id="canvas" style="display:none;"></canvas>
 
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+  <button id="shutter">📸 Detect ISBN</button>
+  <button id="manualBtn">✏️ Manual Entry</button>
+
+  <div id="status"></div>
+
+  <input type="text" id="manualInput" placeholder="Enter ISBN manually..." style="display:none;" />
+  <textarea id="isbnList" readonly placeholder="Verified ISBNs will appear here..."></textarea>
+
+  <button id="sendEmail">📧 Send to Email</button>
+
   <script>
-    const video = document.getElementById('camera');
-    const captureBtn = document.getElementById('capture-btn');
-    const manualBtn = document.getElementById('manual-btn');
-    const sendBtn = document.getElementById('send-btn');
-    const manualEntry = document.getElementById('manual-entry');
-    const isbnOutput = document.getElementById('isbn-output');
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const statusDiv = document.getElementById("status");
+    const manualInput = document.getElementById("manualInput");
+    const isbnList = document.getElementById("isbnList");
 
-    const openLibraryAPI = async (isbn) => {
+    const GOOGLE_API = "https://www.googleapis.com/books/v1/volumes?q=isbn:";
+    const OPENLIBRARY_API = "https://openlibrary.org/api/books?bibkeys=ISBN:";
+
+    function showStatus(msg, isError = false) {
+      statusDiv.textContent = msg;
+      statusDiv.className = isError ? 'error' : 'success';
+      statusDiv.style.display = 'block';
+    }
+
+    function cleanISBN(text) {
+      const match = text.match(/(?:ISBN(?:-1[03])?:?\s*)?((97[89][- ]?)?\d{9}[\dXx])/i);
+      return match ? match[1].replace(/[-\s]/g, '') : null;
+    }
+
+    async function verifyISBN(isbn) {
+      let title = null;
+
+      // Google Books
       try {
-        const response = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`);
-        const data = await response.json();
-        return data[`ISBN:${isbn}`]?.title || 'rescan';
-      } catch {
-        return 'rescan';
+        const res = await fetch(`${GOOGLE_API}${isbn}`);
+        const data = await res.json();
+        if (data.totalItems > 0) {
+          title = data.items[0].volumeInfo.title;
+        }
+      } catch {}
+
+      // OpenLibrary fallback
+      if (!title) {
+        try {
+          const res = await fetch(`${OPENLIBRARY_API}${isbn}&format=json&jscmd=data`);
+          const data = await res.json();
+          if (data[`ISBN:${isbn}`]?.title) {
+            title = data[`ISBN:${isbn}`].title;
+          }
+        } catch {}
       }
-    };
 
-    const extractISBNs = (text) => {
-      const isbnRegex = /(?:ISBN(?:-13)?:?\s*)?(\b97[89][\d\- ]{10,16}\b|\b\d{9}[\dXx]\b)/g;
-      const matches = [...text.matchAll(isbnRegex)].map(m => m[1].replace(/[- ]/g, ''));
-      return [...new Set(matches)];
-    };
+      return title || null;
+    }
 
-    const showManualEntry = () => {
-      manualEntry.style.display = 'block';
-    };
+    function addISBNToList(isbn, title) {
+      isbnList.value += `${isbn}\t${title}\n`;
+    }
 
-    const runOCR = async (imageData) => {
+    async function ocrSpaceFallback(blob) {
+      const formData = new FormData();
+      formData.append("file", blob);
+      formData.append("language", "eng");
+      formData.append("apikey", "helloworld");
+
       try {
-        const result = await Tesseract.recognize(imageData, 'eng');
-        return result.data.text;
+        const res = await fetch("https://api.ocr.space/parse/image", {
+          method: "POST",
+          body: formData
+        });
+        const json = await res.json();
+        return smartOCRExtract(json?.ParsedResults?.[0]?.ParsedText || "");
       } catch (e) {
-        console.error("Tesseract failed, trying server OCR fallback");
-        return await runServerOCR(imageData);
+        console.warn("OCR.space fallback failed", e);
+        return null;
       }
-    };
+    }
 
-    const runServerOCR = async (imageBlob) => {
-      // This endpoint should run PaddleOCR or Google Cloud OCR on your backend
-      const form = new FormData();
-      form.append('file', imageBlob);
-      const res = await fetch('/ocr-fallback', { method: 'POST', body: form });
-      const json = await res.json();
-      return json.text || '';
-    };
+    async function detectFromCanvas(blob) {
+      const imageUrl = URL.createObjectURL(blob);
 
-    const processText = async (text) => {
-      const isbns = extractISBNs(text);
-      const results = [];
-      for (const isbn of isbns) {
-        const title = await openLibraryAPI(isbn);
-        if (title !== 'rescan') {
-          results.push(`${isbn}\t${title}`);
+      // Try Quagga
+      const quaggaISBN = await new Promise(resolve => {
+        Quagga.decodeSingle({
+          src: imageUrl,
+          locate: true,
+          decoder: { readers: ['ean_reader', 'upc_reader'] }
+        }, result => {
+          if (result?.codeResult?.code) resolve(cleanISBN(result.codeResult.code));
+          else resolve(null);
+        });
+      });
+      if (quaggaISBN) return quaggaISBN;
+
+      // Try ZXing
+      try {
+        const zxing = new ZXing.BrowserMultiFormatReader();
+        const result = await zxing.decodeFromImageUrl(imageUrl);
+        return cleanISBN(result.text);
+      } catch {}
+
+      // Tesseract OCR with contrast
+      try {
+        const img = new Image();
+        img.src = imageUrl;
+        await img.decode();
+
+        const ctx = canvas.getContext("2d");
+        ctx.filter = "grayscale(100%) contrast(150%)";
+        ctx.drawImage(img, 0, 0);
+        const enhancedBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.95));
+
+        const { data: { text } } = await Tesseract.recognize(enhancedBlob, 'eng');
+        const isbnFromText = smartOCRExtract(text);
+        if (isbnFromText) return isbnFromText;
+      } catch (err) {
+        console.error("Tesseract OCR failed", err);
+      }
+
+      // OCR.space fallback
+      return await ocrSpaceFallback(blob);
+    }
+
+    function smartOCRExtract(text) {
+      const lines = text.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].toLowerCase().includes("isbn")) {
+          const right = lines[i].split("isbn")[1];
+          const isbn = cleanISBN(right || lines[i + 1] || "");
+          if (isbn) return isbn;
         }
       }
-      isbnOutput.value = results.join('\n');
-      if (results.length === 0) showManualEntry();
-      else showManualEntry();
-    };
+      return cleanISBN(text);
+    }
 
-    const initCamera = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-        video.srcObject = stream;
-      } catch (err) {
-        console.error('Camera failed, switching to manual');
-        showManualEntry();
-      }
-    };
-
-    const captureImage = () => {
-      const canvas = document.createElement('canvas');
+    document.getElementById("shutter").onclick = async () => {
+      showStatus("Capturing...");
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob(async (blob) => {
-        const text = await runOCR(blob);
-        await processText(text);
-      }, 'image/jpeg');
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0);
+
+      canvas.toBlob(async blob => {
+        const isbn = await detectFromCanvas(blob);
+        if (isbn) {
+          const title = await verifyISBN(isbn);
+          if (title) {
+            addISBNToList(isbn, title);
+            showStatus(`✅ Found: ${isbn} - ${title}`);
+          } else {
+            manualInput.value = isbn;
+            manualInput.style.display = 'block';
+            showStatus("⚠️ ISBN not recognized. Please verify manually.", true);
+          }
+        } else {
+          manualInput.style.display = 'block';
+          showStatus("❌ No valid ISBN found. Use manual entry.", true);
+        }
+      }, "image/jpeg", 0.95);
     };
 
-    captureBtn.onclick = () => captureImage();
-    manualBtn.onclick = () => showManualEntry();
-    sendBtn.onclick = () => {
-      const lines = isbnOutput.value.split('\n');
-      const validLines = lines.filter(l => !l.includes('rescan'));
-      const body = encodeURIComponent(validLines.join('\n'));
-      window.location.href = `mailto:?subject=ISBN Submission&body=${body}`;
+    document.getElementById("manualBtn").onclick = () => {
+      manualInput.style.display = 'block';
     };
 
-    window.onload = () => initCamera();
+    manualInput.addEventListener("change", async () => {
+      const isbn = cleanISBN(manualInput.value);
+      if (!isbn) return showStatus("Invalid ISBN format", true);
+      const title = await verifyISBN(isbn);
+      if (title) {
+        addISBNToList(isbn, title);
+        showStatus(`✅ Added: ${isbn} - ${title}`);
+        manualInput.value = "";
+        manualInput.style.display = 'none';
+      } else {
+        showStatus("❌ ISBN not verified.", true);
+      }
+    });
+
+    document.getElementById("sendEmail").onclick = () => {
+      const body = encodeURIComponent(isbnList.value.trim());
+      const subject = "My Book ISBNs";
+      const mailto = `mailto:?subject=${subject}&body=${body}`;
+      window.location.href = mailto;
+    };
+
+    async function initCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        video.srcObject = stream;
+        showStatus("Camera ready");
+      } catch (err) {
+        console.error(err);
+        showStatus("Camera unavailable. Switching to manual.", true);
+        manualInput.style.display = 'block';
+      }
+    }
+
+    window.onload = initCamera;
   </script>
 </body>
 </html>
