@@ -4,7 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>ISBN Scanner App</title>
+  <!-- Tesseract for OCR -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+  <!-- Quagga for barcode decoding (used on single images/canvas frames) -->
   <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
   <style>
     body {
@@ -36,13 +38,8 @@
       border: 2px solid #007bff;
       width: 200px;
     }
-    button:hover {
-      background: #0056b3;
-    }
-    button:disabled {
-      background: #ccc;
-      cursor: not-allowed;
-    }
+    button:hover { background: #0056b3; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
     textarea {
       width: 95%;
       height: 100px;
@@ -54,17 +51,9 @@
       display: none;
       margin-top: 1em;
     }
-    #status {
-      margin-top: 0.8em;
-      font-weight: bold;
-    }
-    #spinner {
-      animation: spin 1s linear infinite;
-    }
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
+    #status { margin-top: 0.8em; font-weight: bold; }
+    #spinner { animation: spin 1s linear infinite; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     #manualInputDiv {
       display: none;
       margin: 1em 0;
@@ -73,155 +62,158 @@
       border-radius: 8px;
       background: #f8f9fa;
     }
-    #manualResult {
-      margin-top: 0.5em;
-      font-weight: bold;
-    }
+    #manualResult { margin-top: 0.5em; font-weight: bold; }
   </style>
 </head>
 <body>
 
   <h2>ISBN Scanner 📚</h2>
-  <!-- Video element for camera feed -->
+
+  <!-- Video element used for a single getUserMedia stream (no Quagga LiveStream) -->
   <video id="video" autoplay muted playsinline></video>
-  <!-- Zoom control slider, hidden by default -->
+
+  <!-- Zoom control slider (shown only if device supports zoom) -->
   <input type="range" id="zoomControl" min="1" max="5" step="0.1" value="1" />
 
   <div>
-    <!-- Main action buttons for image capture and manual upload -->
-    <button onclick="captureImage()">Capture</button>
-    <button onclick="toggleManualInput()">Manual ISBN Entry</button>
-    <button onclick="manualUpload()">Upload Image</button>
-    <button onclick="clearResults()">Clear Results</button>
+    <!-- Buttons use IDs; handlers are bound via addEventListener (CSP friendly) -->
+    <button id="captureBtn">Capture</button>
+    <button id="manualEntryBtn">Manual ISBN Entry</button>
+    <button id="uploadBtn">Upload Image</button>
+    <button id="clearBtn">Clear Results</button>
   </div>
 
-  <!-- Manual ISBN input section (hidden by default) -->
+  <!-- Manual ISBN input (toggle visible) -->
   <div id="manualInputDiv">
     <h3>Enter ISBN Manually</h3>
     <input type="text" id="manualIsbnInput" placeholder="Enter 13-digit ISBN..." maxlength="13" />
-    <button onclick="submitManualIsbn()">Submit</button>
-    <button onclick="toggleManualInput()">Cancel</button>
+    <button id="manualSubmitBtn">Submit</button>
+    <button id="manualCancelBtn">Cancel</button>
     <div id="manualResult"></div>
   </div>
 
-  <!-- Status display area -->
   <p id="status">Initializing...</p>
 
-  <!-- Text area to display detected ISBNs and book information -->
   <textarea id="isbnText" placeholder="Detected ISBNs..."></textarea>
   <br />
-  <!-- Email button to send results -->
-  <button onclick="sendEmail()">Send via Email</button>
-  <!-- Hidden file input for manual image upload -->
-  <input type="file" accept="image/*" id="imageInput" style="display:none" onchange="handleImageUpload(event)" />
+  <button id="sendBtn">Send via Email</button>
 
-  <!-- Hidden canvas for image processing -->
+  <input type="file" accept="image/*" id="imageInput" style="display:none" />
+
+  <!-- Hidden canvas to grab frames for barcode/OCR -->
   <canvas id="canvas" style="display:none;"></canvas>
 
   <script>
-    // DOM element references
+    // Element references
     const video = document.getElementById("video");
     const zoomControl = document.getElementById("zoomControl");
     const isbnText = document.getElementById("isbnText");
     const canvas = document.getElementById("canvas");
     const imageInput = document.getElementById("imageInput");
+
+    const captureBtn = document.getElementById("captureBtn");
+    const manualEntryBtn = document.getElementById("manualEntryBtn");
+    const uploadBtn = document.getElementById("uploadBtn");
+    const clearBtn = document.getElementById("clearBtn");
+    const sendBtn = document.getElementById("sendBtn");
+
     const manualInputDiv = document.getElementById("manualInputDiv");
     const manualIsbnInput = document.getElementById("manualIsbnInput");
+    const manualSubmitBtn = document.getElementById("manualSubmitBtn");
+    const manualCancelBtn = document.getElementById("manualCancelBtn");
     const manualResult = document.getElementById("manualResult");
-    
-    // Global state variables
-    let videoTrack = null;  // Stores the active video track for camera control
-    let isProcessing = false;  // Flag to prevent multiple simultaneous operations
 
-    // Check if browser supports camera functionality
+    // State
+    let videoTrack = null;
+    let isProcessing = false;
+
+    // CSP-safe event bindings
+    document.addEventListener("DOMContentLoaded", () => {
+      captureBtn.addEventListener("click", captureImage);
+      manualEntryBtn.addEventListener("click", toggleManualInput);
+      uploadBtn.addEventListener("click", () => imageInput.click());
+      clearBtn.addEventListener("click", clearResults);
+      sendBtn.addEventListener("click", sendEmail);
+      manualSubmitBtn.addEventListener("click", submitManualIsbn);
+      manualCancelBtn.addEventListener("click", toggleManualInput);
+      manualIsbnInput.addEventListener("keypress", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); submitManualIsbn(); }
+      });
+      manualIsbnInput.addEventListener("input", function () {
+        this.value = this.value.replace(/[^\d]/g, "");
+        manualResult.innerHTML = "";
+      });
+      imageInput.addEventListener("change", handleImageUpload);
+
+      // Initialize camera after bindings
+      if (checkCameraSupport()) initCamera();
+    });
+
+    // Support checks (HTTPS + API)
     function checkCameraSupport() {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         showStatus("❌ Camera not supported in this browser.", true);
         return false;
       }
-      
       if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
         showStatus("❌ Camera requires HTTPS or localhost.", true);
         return false;
       }
-      
       return true;
     }
 
-    // Debug and enumerate available camera devices
+    // Enumerate devices (optional diagnostics)
     async function debugCameraDevices() {
       try {
         const devices = await navigator.mediaDevices.enumerateDevices();
-        const videoDevices = devices.filter(device => device.kind === 'videoinput');
-        
-        console.log('Available video devices:', videoDevices);
-        
+        const videoDevices = devices.filter(d => d.kind === "videoinput");
         if (videoDevices.length === 0) {
           showStatus("❌ No cameras detected on this device.", true);
           return false;
         }
-        
         showStatus(`📷 Found ${videoDevices.length} camera(s). Initializing...`);
         return true;
-      } catch (error) {
-        console.error('Device enumeration failed:', error);
+      } catch (e) {
+        console.error("Device enumeration failed:", e);
         showStatus("❌ Unable to detect cameras.", true);
         return false;
       }
     }
 
-    // Initialize camera and set up video stream with comprehensive error handling
+    // Initialize a single camera stream to <video>
     async function initCamera() {
-      // Check browser support first
-      if (!checkCameraSupport()) return;
-      
-      // Check for available camera devices
-      const hasCamera = await debugCameraDevices();
-      if (!hasCamera) return;
+      const hasCameras = await debugCameraDevices();
+      if (!hasCameras) return;
 
       try {
         showStatus("Requesting camera permission...", false, true);
-        
-        // Request camera access with optimal settings for barcode scanning
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { 
-            facingMode: "environment",  // Use rear camera if available
-            width: { ideal: 1280 },     // High resolution for better scanning
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "environment",
+            width: { ideal: 1280 },
             height: { ideal: 720 }
-          } 
+          }
         });
-        
-        video.srcObject = stream;  // Assign stream to video element
-        videoTrack = stream.getVideoTracks()[0];  // Get the video track for controls
+        video.srcObject = stream;
+        videoTrack = stream.getVideoTracks()[0];
 
-        // Wait for video metadata to load before proceeding
-        await new Promise((resolve) => {
-          video.onloadedmetadata = resolve;
-        });
+        await new Promise(res => video.onloadedmetadata = res);
 
-        // Check if camera supports zoom functionality
-        const capabilities = videoTrack.getCapabilities();
+        const capabilities = videoTrack.getCapabilities?.() || {};
         if (capabilities.zoom) {
-          // Configure zoom control with camera's capabilities
           zoomControl.min = capabilities.zoom.min;
           zoomControl.max = capabilities.zoom.max;
           zoomControl.step = capabilities.zoom.step || 0.1;
           zoomControl.value = capabilities.zoom.min;
-          zoomControl.style.display = "block";  // Show zoom control
-          
-          // Apply zoom changes when user moves slider
+          zoomControl.style.display = "block";
           zoomControl.oninput = () => {
             videoTrack.applyConstraints({ advanced: [{ zoom: parseFloat(zoomControl.value) }] });
           };
         }
 
-        showStatus("✅ Camera ready. Scan a barcode or capture.");
-        initBarcodeScanner();  // Start barcode scanning
-        
+        showStatus("✅ Camera ready. Use Capture or Upload.");
       } catch (error) {
         console.error("Camera initialization error:", error);
-        
-        // Handle specific error types with user-friendly messages
         if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
           showStatus("❌ No camera found. Please connect a camera.", true);
         } else if (error.name === "NotReadableError" || error.name === "TrackStartError") {
@@ -230,15 +222,12 @@
           showStatus("❌ Camera permission denied. Please allow camera access.", true);
         } else if (error.name === "OverconstrainedError" || error.name === "ConstraintNotSatisfiedError") {
           showStatus("❌ Camera constraints not supported. Trying fallback...", true);
-          
-          // Try with basic constraints as fallback
           try {
             const basicStream = await navigator.mediaDevices.getUserMedia({ video: true });
             video.srcObject = basicStream;
             videoTrack = basicStream.getVideoTracks()[0];
             showStatus("✅ Camera ready with basic settings.");
-            initBarcodeScanner();
-          } catch (fallbackError) {
+          } catch {
             showStatus("❌ Camera not available.", true);
           }
         } else {
@@ -247,371 +236,245 @@
       }
     }
 
-    // Initialize QuaggaJS barcode scanner for real-time detection
-    function initBarcodeScanner() {
-      Quagga.init({
-        inputStream: {
-          name: "Live",
-          type: "LiveStream",
-          target: video,  // Use video element as input
-        },
-        decoder: {
-          readers: ["ean_reader"]  // Use EAN reader for ISBN barcodes
-        }
-      }, err => {
-        if (err) {
-          console.error('Barcode scanner initialization failed:', err);
-          showStatus("⚠️ Barcode scanner failed to start. Use capture or manual entry.", true);
+    // Button state management
+    function setButtonsState(disabled) {
+      [captureBtn, manualEntryBtn, uploadBtn, clearBtn, sendBtn].forEach(b => { if (b) b.disabled = disabled; });
+    }
+
+    // Capture a frame and decode: try barcode via Quagga, then OCR fallback
+    async function captureImage() {
+      if (isProcessing) return;
+      isProcessing = true;
+      setButtonsState(true);
+      showStatus("📷 Capturing frame and scanning...", false, true);
+
+      try {
+        // Draw the current video frame into canvas
+        canvas.width = video.videoWidth || 1280;
+        canvas.height = video.videoHeight || 720;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Attempt barcode first using Quagga on this single image (no extra camera stream)
+        const code = await decodeCanvasWithQuagga(canvas);
+        if (code && /^97\d{11}$/.test(code)) {
+          showStatus(`📖 Barcode detected: ${code}`);
+          await fetchAllSources(code);
           return;
         }
-        Quagga.start();  // Begin scanning
-      });
 
-      // Handle barcode detection events
-      Quagga.onDetected(data => {
-        if (isProcessing) return;  // Prevent processing if already busy
-        const code = data.codeResult.code;  // Extract barcode value
-        
-        // Validate that detected code is a valid ISBN-13 (starts with 978 or 979, 13 digits total)
-        if (/^97\d{11}$/.test(code)) {
-          isProcessing = true;  // Set processing flag
-          setButtonsState(true);  // Disable all buttons
-          Quagga.stop();  // Temporarily stop scanner
-          
-          // Process the detected ISBN and re-enable scanner when done
-          fetchAllSources(code).finally(() => {
-            isProcessing = false;
-            setButtonsState(false);
-            Quagga.start();
-          });
-          showStatus(`📖 ISBN Detected via Barcode: ${code}`);
-        }
-      });
-    }
-
-    // Manage button states during processing to prevent multiple operations
-    function setButtonsState(disabled) {
-      const captureBtn = document.querySelector('button[onclick="captureImage()"]');
-      const manualEntryBtn = document.querySelector('button[onclick="toggleManualInput()"]');
-      const uploadBtn = document.querySelector('button[onclick="manualUpload()"]');
-      const emailBtn = document.querySelector('button[onclick="sendEmail()"]');
-      const clearBtn = document.querySelector('button[onclick="clearResults()"]');
-      
-      // Enable/disable all interactive buttons
-      if (captureBtn) captureBtn.disabled = disabled;
-      if (manualEntryBtn) manualEntryBtn.disabled = disabled;
-      if (uploadBtn) uploadBtn.disabled = disabled;
-      if (emailBtn) emailBtn.disabled = disabled;
-      if (clearBtn) clearBtn.disabled = disabled;
-    }
-
-    // Toggle manual ISBN input section visibility
-    function toggleManualInput() {
-      const isVisible = manualInputDiv.style.display !== "none";
-      manualInputDiv.style.display = isVisible ? "none" : "block";
-      
-      if (!isVisible) {
-        // Focus on input when showing
-        manualIsbnInput.focus();
-        manualResult.innerHTML = "";  // Clear previous results
-        manualIsbnInput.value = "";   // Clear input field
-      }
-    }
-
-    // Validate and submit manually entered ISBN
-    function submitManualIsbn() {
-      const isbn = manualIsbnInput.value.trim().replace(/[^\d]/g, ''); // Remove non-digits
-      
-      // Clear previous result
-      manualResult.innerHTML = "";
-      
-      // Validate ISBN format
-      if (!isbn) {
-        manualResult.innerHTML = '<span style="color: red;">❌ Please enter an ISBN</span>';
-        return;
-      }
-      
-      if (!/^97[89]\d{10}$/.test(isbn)) {
-        manualResult.innerHTML = '<span style="color: red;">❌ Invalid ISBN format. Must be 13 digits starting with 978 or 979</span>';
-        return;
-      }
-      
-      // Check if ISBN already exists
-      if (isbnText.value.includes(isbn)) {
-        manualResult.innerHTML = '<span style="color: orange;">⚠️ ISBN already in results</span>';
-        return;
-      }
-      
-      // Process the ISBN
-      manualResult.innerHTML = '<span style="color: blue;">🔍 Looking up book information...</span>';
-      
-      fetchAllSources(isbn).then(() => {
-        manualResult.innerHTML = '<span style="color: green;">✅ Book information added to results</span>';
-        // Clear input after successful submission
-        manualIsbnInput.value = "";
-      }).catch(error => {
-        manualResult.innerHTML = '<span style="color: red;">❌ Error looking up book information</span>';
-      });
-    }
-
-    // Capture current video frame and perform OCR to detect ISBNs
-    function captureImage() {
-      if (isProcessing) return;  // Exit if already processing
-      
-      isProcessing = true;  // Set processing flag
-      setButtonsState(true);  // Disable all buttons
-      Quagga.stop();  // Stop barcode scanner
-      showStatus("📷 Scanning image via OCR...", false, true);  // Show loading status
-
-      // Set canvas dimensions to match video
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext("2d");
-      
-      // Draw current video frame to canvas
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      // Perform OCR on captured image
-      Tesseract.recognize(canvas, 'eng').then(({  { text } }) => {
-        // Extract ISBN numbers from OCR text
+        // Fallback to OCR if no barcode found
+        showStatus("🔤 No barcode; running OCR...", false, true);
+        const { data: { text } } = await Tesseract.recognize(canvas, 'eng');
         const matches = extractISBNs(text);
         if (!matches.length) {
           showStatus("❌ No valid ISBN-13 found in image.");
           return;
         }
-
         showStatus(`🔍 Found ${matches.length} ISBN(s). Processing...`);
+        await Promise.all(matches.map(isbn => fetchAllSources(isbn)));
+        showStatus(`✅ Processed ${matches.length} ISBN(s).`);
+      } catch (e) {
+        console.error("Capture error:", e);
+        showStatus("❌ Capture/scan failed. Try again.", true);
+      } finally {
+        isProcessing = false;
+        setButtonsState(false);
+      }
+    }
 
-        // Process each found ISBN
-        let remaining = matches.length;
-        matches.forEach(isbn => {
-          fetchAllSources(isbn).finally(() => {
-            remaining--;
-            // Re-enable interface when all ISBNs are processed
-            if (remaining === 0) {
-              showStatus(`✅ Processed ${matches.length} ISBN(s).`);
-              isProcessing = false;
-              setButtonsState(false);
-              Quagga.start();
-            }
+    // Use Quagga.decodeSingle on canvas data URL
+    function decodeCanvasWithQuagga(canvasEl) {
+      return new Promise((resolve) => {
+        try {
+          const dataUrl = canvasEl.toDataURL("image/jpeg", 0.92);
+          Quagga.decodeSingle({
+            src: dataUrl,
+            inputStream: { size: 800 },
+            locate: true,
+            decoder: { readers: ["ean_reader"] }
+          }, function (result) {
+            const code = result && result.codeResult && result.codeResult.code;
+            resolve(code || null);
           });
-        });
-      }).catch(err => {
-        // Handle OCR errors
-        console.error('OCR failed:', err);
-        showStatus("❌ OCR failed. Try capturing again.", true);
-      }).finally(() => {
-        // Ensure cleanup happens even if OCR fails
-        if (isProcessing) {
-          isProcessing = false;
-          setButtonsState(false);
-          Quagga.start();
+        } catch {
+          resolve(null);
         }
       });
     }
 
-    // Enhanced ISBN extraction with comprehensive validation
+    // Enhanced ISBN extraction (13 digits starting 978/979; tolerate dashes/spaces)
     function extractISBNs(text) {
-      // More comprehensive ISBN-13 extraction pattern (handles various formats)
       const isbnPattern = /(?:ISBN[-:\s]*)?(?:97[89][-\s]?\d{1}[-\s]?\d{3}[-\s]?\d{5}[-\s]?\d{1}|\b97[89]\d{10}\b)/gi;
       const matches = text.match(isbnPattern) || [];
-      
-      // Clean and validate extracted ISBNs
-      return [...new Set(matches.map(isbn => 
-        isbn.replace(/[^\d]/g, '') // Remove all non-digits
-      ).filter(isbn => 
-        /^97[89]\d{10}$/.test(isbn) // Validate 13-digit format starting with 978/979
-      ))];
+      return [...new Set(matches.map(s => s.replace(/[^\d]/g, '')).filter(s => /^97[89]\d{10}$/.test(s)))];
     }
 
-    // Fetch book information from APIs with retry logic and exponential backoff
+    // Simple retry wrapper for fetches
     async function fetchWithRetry(url, maxRetries = 2) {
-      // Attempt API call with exponential backoff retry
       for (let i = 0; i <= maxRetries; i++) {
         try {
-          const response = await fetch(url);
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          return response;
-        } catch (error) {
-          if (i === maxRetries) throw error;  // Final attempt failed
-          // Wait before retry (1s, 2s, etc.)
-          await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+          const r = await fetch(url);
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r;
+        } catch (e) {
+          if (i === maxRetries) throw e;
+          await new Promise(res => setTimeout(res, 1000 * (i + 1)));
         }
       }
     }
 
-    // Query multiple book databases for ISBN information with comprehensive error handling
+    // Query multiple sources for a given ISBN
     function fetchAllSources(isbn) {
       return (async () => {
+        const existing = isbnText.value;
+        if (existing.includes(isbn)) return;
+
+        const results = [`${isbn}`];
+
         try {
-          // Check if ISBN already exists in results
-          const existing = isbnText.value;
-          if (existing.includes(isbn)) return;
+          const gBook = await fetchWithRetry(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`).then(r => r.json());
+          const gTitle = gBook.items?.[0]?.volumeInfo?.title;
+          if (gTitle) results.push(`GoogleBooks: ${gTitle}`);
+        } catch (e) { console.warn("Google Books failed:", e); }
 
-          const results = [`${isbn}`];  // Start with ISBN number
+        try {
+          const openLib = await fetchWithRetry(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`).then(r => r.json());
+          const oTitle = openLib[`ISBN:${isbn}`]?.title;
+          if (oTitle) results.push(`OpenLibrary: ${oTitle}`);
+        } catch (e) { console.warn("OpenLibrary failed:", e); }
 
-          // Google Books API with error handling
-          try {
-            const gBook = await fetchWithRetry(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`)
-              .then(r => r.json());
-            const gTitle = gBook.items?.[0]?.volumeInfo?.title;
-            if (gTitle) results.push(`GoogleBooks: ${gTitle}`);
-          } catch (e) {
-            console.warn(`Google Books API failed for ${isbn}:`, e);
-          }
+        try {
+          const libThing = await fetchWithRetry(`https://www.librarything.com/api/thingTitle/${isbn}`).then(r => r.text());
+          if (libThing && !libThing.includes('No data')) results.push(`LibraryThing: ${libThing.trim()}`);
+        } catch (e) { console.warn("LibraryThing failed:", e); }
 
-          // OpenLibrary API with error handling
-          try {
-            const openLib = await fetchWithRetry(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`)
-              .then(r => r.json());
-            const oTitle = openLib[`ISBN:${isbn}`]?.title;
-            if (oTitle) results.push(`OpenLibrary: ${oTitle}`);
-          } catch (e) {
-            console.warn(`OpenLibrary API failed for ${isbn}:`, e);
-          }
-
-          // LibraryThing API with error handling
-          try {
-            const libThing = await fetchWithRetry(`https://www.librarything.com/api/thingTitle/${isbn}`)
-              .then(r => r.text());
-            if (libThing && !libThing.includes('No data')) {
-              results.push(`LibraryThing: ${libThing.trim()}`);
-            }
-          } catch (e) {
-            console.warn(`LibraryThing API failed for ${isbn}:`, e);
-          }
-
-          // If no book info found, mark for rescanning
-          if (results.length === 1) results.push("RESCAN");
-          
-          // Add results to textarea
-          appendISBN(results.join(" | "));
-        } catch (error) {
-          console.error(`Error processing ISBN ${isbn}:`, error);
-          showStatus(`❌ Error processing ISBN: ${isbn}`, true);
-        }
+        if (results.length === 1) results.push("RESCAN");
+        appendISBN(results.join(" | "));
       })();
     }
 
-    // Add ISBN entry to results textarea
+    // Append to textarea
     function appendISBN(entry) {
-      // Add new entry with line break if textarea has content
       isbnText.value += (isbnText.value ? "\n" : "") + entry;
     }
 
-    // Send results via email using mailto protocol
+    // Mail results
     function sendEmail() {
-      // Filter out "RESCAN" entries for cleaner email
       const cleanLines = isbnText.value.split("\n").filter(line => !line.includes("RESCAN"));
       if (!cleanLines.length) return alert("❌ Nothing to send.");
-      
-      // Create email with subject and body containing ISBN results
       const mail = `mailto:?subject=Scanned ISBNs&body=${encodeURIComponent(cleanLines.join("\n"))}`;
-      window.location.href = mail;  // Open default email client
+      window.location.href = mail;
     }
 
-    // Trigger hidden file input for manual image upload
-    function manualUpload() {
-      imageInput.click();
+    // Toggle manual input UI
+    function toggleManualInput() {
+      const nowVisible = manualInputDiv.style.display !== "block";
+      manualInputDiv.style.display = nowVisible ? "block" : "none";
+      if (nowVisible) {
+        manualIsbnInput.value = "";
+        manualResult.innerHTML = "";
+        manualIsbnInput.focus();
+      }
     }
 
-    // Clear all results from textarea
-    function clearResults() {
-      isbnText.value = "";  // Clear textarea content
-      manualResult.innerHTML = "";  // Clear manual input result
-      showStatus("🗑️ Results cleared.");
-    }
+    // Manual ISBN submit
+    function submitManualIsbn() {
+      const isbn = manualIsbnInput.value.trim().replace(/[^\d]/g, '');
+      manualResult.innerHTML = "";
 
-    // Handle manually uploaded image files
-    function handleImageUpload(event) {
-      const file = event.target.files[0];  // Get selected file
-      if (!file) return;
-      
-      setButtonsState(true);  // Disable buttons during processing
-      showStatus("📤 Processing uploaded image...", false, true);
+      if (!isbn) {
+        manualResult.innerHTML = '<span style="color: red;">❌ Please enter an ISBN</span>';
+        return;
+      }
+      if (!/^97[89]\d{10}$/.test(isbn)) {
+        manualResult.innerHTML = '<span style="color: red;">❌ Invalid ISBN format. Must be 13 digits starting with 978 or 979</span>';
+        return;
+      }
+      if (isbnText.value.includes(isbn)) {
+        manualResult.innerHTML = '<span style="color: orange;">⚠️ ISBN already in results</span>';
+        return;
+      }
 
-      // Perform OCR on uploaded file
-      Tesseract.recognize(file, 'eng').then(({  { text } }) => {
-        const matches = extractISBNs(text);  // Extract ISBNs from OCR text
-        if (!matches.length) {
-          showStatus("❌ No valid ISBN-13 found in uploaded image.");
-          return;
-        }
-        
-        showStatus(`🔍 Found ${matches.length} ISBN(s) in upload. Processing...`);
-        
-        // Process each found ISBN
-        let remaining = matches.length;
-        matches.forEach(isbn => {
-          fetchAllSources(isbn).finally(() => {
-            remaining--;
-            if (remaining === 0) {
-              showStatus(`✅ Processed ${matches.length} ISBN(s) from upload.`);
-              setButtonsState(false);  // Re-enable buttons when done
-            }
-          });
-        });
-      }).catch(err => {
-        console.error('Upload OCR failed:', err);
-        showStatus("❌ OCR failed on uploaded image.", true);
-      }).finally(() => {
-        setButtonsState(false);  // Ensure buttons are re-enabled
-        // Clear file input for next use
-        imageInput.value = '';
+      manualResult.innerHTML = '<span style="color: blue;">🔍 Looking up book information...</span>';
+      fetchAllSources(isbn).then(() => {
+        manualResult.innerHTML = '<span style="color: green;">✅ Book information added to results</span>';
+        manualIsbnInput.value = "";
+      }).catch(() => {
+        manualResult.innerHTML = '<span style="color: red;">❌ Error looking up book information</span>';
       });
     }
 
-    // Display status messages to user with optional loading spinner
-    function showStatus(msg, error = false, showSpinner = false) {
-      const el = document.getElementById("status");
-      // Show message with optional spinner animation
-      el.innerHTML = showSpinner ? `${msg} <span id="spinner">⏳</span>` : msg;
-      el.style.color = error ? "red" : "green";  // Color code status (red for errors, green for success)
+    // Upload image handler: try barcode via Quagga first, OCR fallback
+    async function handleImageUpload(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      setButtonsState(true);
+      showStatus("📤 Processing uploaded image...", false, true);
+
+      try {
+        // Draw image file into canvas
+        const img = new Image();
+        img.onload = async () => {
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0);
+
+          // Try barcode
+          const code = await decodeCanvasWithQuagga(canvas);
+          if (code && /^97\d{11}$/.test(code)) {
+            showStatus(`📖 Barcode detected from upload: ${code}`);
+            await fetchAllSources(code);
+          } else {
+            // OCR fallback
+            showStatus("🔤 No barcode in upload; running OCR...", false, true);
+            const { data: { text } } = await Tesseract.recognize(canvas, 'eng');
+            const matches = extractISBNs(text);
+            if (!matches.length) {
+              showStatus("❌ No valid ISBN-13 found in uploaded image.");
+            } else {
+              showStatus(`🔍 Found ${matches.length} ISBN(s) in upload. Processing...`);
+              await Promise.all(matches.map(isbn => fetchAllSources(isbn)));
+              showStatus(`✅ Processed ${matches.length} ISBN(s) from upload.`);
+            }
+          }
+          setButtonsState(false);
+          imageInput.value = "";
+        };
+        img.onerror = () => {
+          showStatus("❌ Could not read image file.", true);
+          setButtonsState(false);
+          imageInput.value = "";
+        };
+        img.src = URL.createObjectURL(file);
+      } catch (err) {
+        console.error("Upload processing failed:", err);
+        showStatus("❌ OCR/scan failed on uploaded image.", true);
+        setButtonsState(false);
+        imageInput.value = "";
+      }
     }
 
-    // Clean up camera resources to prevent memory leaks
+    // Status helper (with optional spinner)
+    function showStatus(msg, error = false, showSpinner = false) {
+      const el = document.getElementById("status");
+      el.innerHTML = showSpinner ? `${msg} <span id="spinner">⏳</span>` : msg;
+      el.style.color = error ? "red" : "green";
+    }
+
+    // Cleanup on unload
     function stopCamera() {
-      // Stop video track if active
       if (videoTrack) {
         videoTrack.stop();
         videoTrack = null;
       }
-      // Stop all tracks in video stream
       if (video.srcObject) {
-        video.srcObject.getTracks().forEach(track => track.stop());
+        video.srcObject.getTracks().forEach(t => t.stop());
         video.srcObject = null;
       }
     }
-
-    // Add Enter key support for manual ISBN input
-    manualIsbnInput.addEventListener('keypress', function(event) {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        submitManualIsbn();
-      }
-    });
-
-    // Only allow digits in manual ISBN input
-    manualIsbnInput.addEventListener('input', function(event) {
-      // Remove any non-digit characters
-      this.value = this.value.replace(/[^\d]/g, '');
-      
-      // Clear result when user types
-      if (manualResult.innerHTML) {
-        manualResult.innerHTML = "";
-      }
-    });
-
-    // Initialize camera when page loads
-    window.onload = () => {
-      if (checkCameraSupport()) {
-        initCamera();
-      }
-    };
-    
-    // Clean up camera resources when user leaves page
     window.addEventListener('beforeunload', stopCamera);
   </script>
-
 </body>
 </html>
