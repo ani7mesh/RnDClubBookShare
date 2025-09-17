@@ -20,7 +20,7 @@
       object-fit: contain;
       border-radius: 8px;
     }
-    button, input[type="file"] {
+    button, input[type="file"], input[type="text"] {
       margin: 0.5em;
       padding: 0.6em 1.2em;
       font-size: 1em;
@@ -29,6 +29,12 @@
       color: white;
       border-radius: 6px;
       cursor: pointer;
+    }
+    input[type="text"] {
+      background: white;
+      color: black;
+      border: 2px solid #007bff;
+      width: 200px;
     }
     button:hover {
       background: #0056b3;
@@ -59,6 +65,18 @@
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
+    #manualInputDiv {
+      display: none;
+      margin: 1em 0;
+      padding: 1em;
+      border: 2px solid #007bff;
+      border-radius: 8px;
+      background: #f8f9fa;
+    }
+    #manualResult {
+      margin-top: 0.5em;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
@@ -72,8 +90,18 @@
   <div>
     <!-- Main action buttons for image capture and manual upload -->
     <button onclick="captureImage()">Capture</button>
-    <button onclick="manualUpload()">Manual Entry</button>
+    <button onclick="toggleManualInput()">Manual ISBN Entry</button>
+    <button onclick="manualUpload()">Upload Image</button>
     <button onclick="clearResults()">Clear Results</button>
+  </div>
+
+  <!-- Manual ISBN input section (hidden by default) -->
+  <div id="manualInputDiv">
+    <h3>Enter ISBN Manually</h3>
+    <input type="text" id="manualIsbnInput" placeholder="Enter 13-digit ISBN..." maxlength="13" />
+    <button onclick="submitManualIsbn()">Submit</button>
+    <button onclick="toggleManualInput()">Cancel</button>
+    <div id="manualResult"></div>
   </div>
 
   <!-- Status display area -->
@@ -97,18 +125,79 @@
     const isbnText = document.getElementById("isbnText");
     const canvas = document.getElementById("canvas");
     const imageInput = document.getElementById("imageInput");
+    const manualInputDiv = document.getElementById("manualInputDiv");
+    const manualIsbnInput = document.getElementById("manualIsbnInput");
+    const manualResult = document.getElementById("manualResult");
     
     // Global state variables
     let videoTrack = null;  // Stores the active video track for camera control
     let isProcessing = false;  // Flag to prevent multiple simultaneous operations
 
-    // Initialize camera and set up video stream
-    async function initCamera() {
+    // Check if browser supports camera functionality
+    function checkCameraSupport() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showStatus("❌ Camera not supported in this browser.", true);
+        return false;
+      }
+      
+      if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+        showStatus("❌ Camera requires HTTPS or localhost.", true);
+        return false;
+      }
+      
+      return true;
+    }
+
+    // Debug and enumerate available camera devices
+    async function debugCameraDevices() {
       try {
-        // Request camera access with rear-facing camera preference
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(device => device.kind === 'videoinput');
+        
+        console.log('Available video devices:', videoDevices);
+        
+        if (videoDevices.length === 0) {
+          showStatus("❌ No cameras detected on this device.", true);
+          return false;
+        }
+        
+        showStatus(`📷 Found ${videoDevices.length} camera(s). Initializing...`);
+        return true;
+      } catch (error) {
+        console.error('Device enumeration failed:', error);
+        showStatus("❌ Unable to detect cameras.", true);
+        return false;
+      }
+    }
+
+    // Initialize camera and set up video stream with comprehensive error handling
+    async function initCamera() {
+      // Check browser support first
+      if (!checkCameraSupport()) return;
+      
+      // Check for available camera devices
+      const hasCamera = await debugCameraDevices();
+      if (!hasCamera) return;
+
+      try {
+        showStatus("Requesting camera permission...", false, true);
+        
+        // Request camera access with optimal settings for barcode scanning
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            facingMode: "environment",  // Use rear camera if available
+            width: { ideal: 1280 },     // High resolution for better scanning
+            height: { ideal: 720 }
+          } 
+        });
+        
         video.srcObject = stream;  // Assign stream to video element
         videoTrack = stream.getVideoTracks()[0];  // Get the video track for controls
+
+        // Wait for video metadata to load before proceeding
+        await new Promise((resolve) => {
+          video.onloadedmetadata = resolve;
+        });
 
         // Check if camera supports zoom functionality
         const capabilities = videoTrack.getCapabilities();
@@ -126,11 +215,35 @@
           };
         }
 
-        showStatus("Camera ready. Scan a barcode or capture.");
+        showStatus("✅ Camera ready. Scan a barcode or capture.");
         initBarcodeScanner();  // Start barcode scanning
-      } catch (e) {
-        // Handle camera access errors (permissions, hardware issues)
-        showStatus("Camera error. Try manual entry.", true);
+        
+      } catch (error) {
+        console.error("Camera initialization error:", error);
+        
+        // Handle specific error types with user-friendly messages
+        if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
+          showStatus("❌ No camera found. Please connect a camera.", true);
+        } else if (error.name === "NotReadableError" || error.name === "TrackStartError") {
+          showStatus("❌ Camera in use by another application.", true);
+        } else if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
+          showStatus("❌ Camera permission denied. Please allow camera access.", true);
+        } else if (error.name === "OverconstrainedError" || error.name === "ConstraintNotSatisfiedError") {
+          showStatus("❌ Camera constraints not supported. Trying fallback...", true);
+          
+          // Try with basic constraints as fallback
+          try {
+            const basicStream = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = basicStream;
+            videoTrack = basicStream.getVideoTracks()[0];
+            showStatus("✅ Camera ready with basic settings.");
+            initBarcodeScanner();
+          } catch (fallbackError) {
+            showStatus("❌ Camera not available.", true);
+          }
+        } else {
+          showStatus(`❌ Camera error: ${error.message}`, true);
+        }
       }
     }
 
@@ -146,7 +259,11 @@
           readers: ["ean_reader"]  // Use EAN reader for ISBN barcodes
         }
       }, err => {
-        if (err) return;  // Exit if initialization fails
+        if (err) {
+          console.error('Barcode scanner initialization failed:', err);
+          showStatus("⚠️ Barcode scanner failed to start. Use capture or manual entry.", true);
+          return;
+        }
         Quagga.start();  // Begin scanning
       });
 
@@ -167,23 +284,74 @@
             setButtonsState(false);
             Quagga.start();
           });
-          showStatus(`ISBN Detected via Barcode: ${code}`);
+          showStatus(`📖 ISBN Detected via Barcode: ${code}`);
         }
       });
     }
 
-    // Manage button states during processing
+    // Manage button states during processing to prevent multiple operations
     function setButtonsState(disabled) {
       const captureBtn = document.querySelector('button[onclick="captureImage()"]');
-      const manualBtn = document.querySelector('button[onclick="manualUpload()"]');
+      const manualEntryBtn = document.querySelector('button[onclick="toggleManualInput()"]');
+      const uploadBtn = document.querySelector('button[onclick="manualUpload()"]');
       const emailBtn = document.querySelector('button[onclick="sendEmail()"]');
       const clearBtn = document.querySelector('button[onclick="clearResults()"]');
       
       // Enable/disable all interactive buttons
-      captureBtn.disabled = disabled;
-      manualBtn.disabled = disabled;
-      emailBtn.disabled = disabled;
-      clearBtn.disabled = disabled;
+      if (captureBtn) captureBtn.disabled = disabled;
+      if (manualEntryBtn) manualEntryBtn.disabled = disabled;
+      if (uploadBtn) uploadBtn.disabled = disabled;
+      if (emailBtn) emailBtn.disabled = disabled;
+      if (clearBtn) clearBtn.disabled = disabled;
+    }
+
+    // Toggle manual ISBN input section visibility
+    function toggleManualInput() {
+      const isVisible = manualInputDiv.style.display !== "none";
+      manualInputDiv.style.display = isVisible ? "none" : "block";
+      
+      if (!isVisible) {
+        // Focus on input when showing
+        manualIsbnInput.focus();
+        manualResult.innerHTML = "";  // Clear previous results
+        manualIsbnInput.value = "";   // Clear input field
+      }
+    }
+
+    // Validate and submit manually entered ISBN
+    function submitManualIsbn() {
+      const isbn = manualIsbnInput.value.trim().replace(/[^\d]/g, ''); // Remove non-digits
+      
+      // Clear previous result
+      manualResult.innerHTML = "";
+      
+      // Validate ISBN format
+      if (!isbn) {
+        manualResult.innerHTML = '<span style="color: red;">❌ Please enter an ISBN</span>';
+        return;
+      }
+      
+      if (!/^97[89]\d{10}$/.test(isbn)) {
+        manualResult.innerHTML = '<span style="color: red;">❌ Invalid ISBN format. Must be 13 digits starting with 978 or 979</span>';
+        return;
+      }
+      
+      // Check if ISBN already exists
+      if (isbnText.value.includes(isbn)) {
+        manualResult.innerHTML = '<span style="color: orange;">⚠️ ISBN already in results</span>';
+        return;
+      }
+      
+      // Process the ISBN
+      manualResult.innerHTML = '<span style="color: blue;">🔍 Looking up book information...</span>';
+      
+      fetchAllSources(isbn).then(() => {
+        manualResult.innerHTML = '<span style="color: green;">✅ Book information added to results</span>';
+        // Clear input after successful submission
+        manualIsbnInput.value = "";
+      }).catch(error => {
+        manualResult.innerHTML = '<span style="color: red;">❌ Error looking up book information</span>';
+      });
     }
 
     // Capture current video frame and perform OCR to detect ISBNs
@@ -193,7 +361,7 @@
       isProcessing = true;  // Set processing flag
       setButtonsState(true);  // Disable all buttons
       Quagga.stop();  // Stop barcode scanner
-      showStatus("Scanning image via OCR...", false, true);  // Show loading status
+      showStatus("📷 Scanning image via OCR...", false, true);  // Show loading status
 
       // Set canvas dimensions to match video
       canvas.width = video.videoWidth;
@@ -208,9 +376,11 @@
         // Extract ISBN numbers from OCR text
         const matches = extractISBNs(text);
         if (!matches.length) {
-          showStatus("No valid ISBN-13 found.");
+          showStatus("❌ No valid ISBN-13 found in image.");
           return;
         }
+
+        showStatus(`🔍 Found ${matches.length} ISBN(s). Processing...`);
 
         // Process each found ISBN
         let remaining = matches.length;
@@ -219,6 +389,7 @@
             remaining--;
             // Re-enable interface when all ISBNs are processed
             if (remaining === 0) {
+              showStatus(`✅ Processed ${matches.length} ISBN(s).`);
               isProcessing = false;
               setButtonsState(false);
               Quagga.start();
@@ -227,7 +398,8 @@
         });
       }).catch(err => {
         // Handle OCR errors
-        showStatus("OCR failed.", true);
+        console.error('OCR failed:', err);
+        showStatus("❌ OCR failed. Try capturing again.", true);
       }).finally(() => {
         // Ensure cleanup happens even if OCR fails
         if (isProcessing) {
@@ -252,7 +424,7 @@
       ))];
     }
 
-    // Fetch book information from multiple API sources with retry logic
+    // Fetch book information from APIs with retry logic and exponential backoff
     async function fetchWithRetry(url, maxRetries = 2) {
       // Attempt API call with exponential backoff retry
       for (let i = 0; i <= maxRetries; i++) {
@@ -268,7 +440,7 @@
       }
     }
 
-    // Query multiple book databases for ISBN information
+    // Query multiple book databases for ISBN information with comprehensive error handling
     function fetchAllSources(isbn) {
       return (async () => {
         try {
@@ -316,7 +488,7 @@
           appendISBN(results.join(" | "));
         } catch (error) {
           console.error(`Error processing ISBN ${isbn}:`, error);
-          showStatus(`Error processing ISBN: ${isbn}`, true);
+          showStatus(`❌ Error processing ISBN: ${isbn}`, true);
         }
       })();
     }
@@ -331,7 +503,7 @@
     function sendEmail() {
       // Filter out "RESCAN" entries for cleaner email
       const cleanLines = isbnText.value.split("\n").filter(line => !line.includes("RESCAN"));
-      if (!cleanLines.length) return alert("Nothing to send.");
+      if (!cleanLines.length) return alert("❌ Nothing to send.");
       
       // Create email with subject and body containing ISBN results
       const mail = `mailto:?subject=Scanned ISBNs&body=${encodeURIComponent(cleanLines.join("\n"))}`;
@@ -346,7 +518,8 @@
     // Clear all results from textarea
     function clearResults() {
       isbnText.value = "";  // Clear textarea content
-      showStatus("Results cleared.");
+      manualResult.innerHTML = "";  // Clear manual input result
+      showStatus("🗑️ Results cleared.");
     }
 
     // Handle manually uploaded image files
@@ -355,15 +528,17 @@
       if (!file) return;
       
       setButtonsState(true);  // Disable buttons during processing
-      showStatus("Processing uploaded image...", false, true);
+      showStatus("📤 Processing uploaded image...", false, true);
 
       // Perform OCR on uploaded file
       Tesseract.recognize(file, 'eng').then(({  { text } }) => {
         const matches = extractISBNs(text);  // Extract ISBNs from OCR text
         if (!matches.length) {
-          showStatus("No valid ISBN-13 found.");
+          showStatus("❌ No valid ISBN-13 found in uploaded image.");
           return;
         }
+        
+        showStatus(`🔍 Found ${matches.length} ISBN(s) in upload. Processing...`);
         
         // Process each found ISBN
         let remaining = matches.length;
@@ -371,14 +546,18 @@
           fetchAllSources(isbn).finally(() => {
             remaining--;
             if (remaining === 0) {
+              showStatus(`✅ Processed ${matches.length} ISBN(s) from upload.`);
               setButtonsState(false);  // Re-enable buttons when done
             }
           });
         });
       }).catch(err => {
-        showStatus("OCR failed on uploaded image.", true);
+        console.error('Upload OCR failed:', err);
+        showStatus("❌ OCR failed on uploaded image.", true);
       }).finally(() => {
         setButtonsState(false);  // Ensure buttons are re-enabled
+        // Clear file input for next use
+        imageInput.value = '';
       });
     }
 
@@ -404,8 +583,31 @@
       }
     }
 
+    // Add Enter key support for manual ISBN input
+    manualIsbnInput.addEventListener('keypress', function(event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        submitManualIsbn();
+      }
+    });
+
+    // Only allow digits in manual ISBN input
+    manualIsbnInput.addEventListener('input', function(event) {
+      // Remove any non-digit characters
+      this.value = this.value.replace(/[^\d]/g, '');
+      
+      // Clear result when user types
+      if (manualResult.innerHTML) {
+        manualResult.innerHTML = "";
+      }
+    });
+
     // Initialize camera when page loads
-    window.onload = initCamera;
+    window.onload = () => {
+      if (checkCameraSupport()) {
+        initCamera();
+      }
+    };
     
     // Clean up camera resources when user leaves page
     window.addEventListener('beforeunload', stopCamera);
