@@ -5,36 +5,85 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Showcase Library • 50 ISBNs</title>
 <style>
-:root {
-  --bg: #0f172a; --panel: #111827; --card: #0b1220; --fg: #e5e7eb; --muted:#9ca3af; --accent:#60a5fa; --ring:#1d4ed8;
-}
+:root { --bg:#0f172a; --panel:#111827; --card:#0b1220; --fg:#e5e7eb; --muted:#9ca3af; --accent:#60a5fa; --ring:#1d4ed8; --danger:#ef4444; }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
-body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Arial, sans-serif; background: radial-gradient(1200px 800px at 70% -10%, #1f2937 0%, #0f172a 60%); color: var(--fg); }
-header.top { position: sticky; top: 0; z-index: 10; display: grid; gap: .75rem; padding: 1rem; background: rgba(17,24,39,.7); backdrop-filter: blur(8px); border-bottom: 1px solid rgba(255,255,255,.06); }
+body {
+  margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Arial, sans-serif;
+  background: radial-gradient(1200px 800px at 70% -10%, #1f2937 0%, #0f172a 60%); color: var(--fg);
+}
+header.top {
+  position: sticky; top: 0; z-index: 10; display: grid; gap: .75rem; padding: 1rem;
+  background: rgba(17,24,39,.7); backdrop-filter: blur(8px); border-bottom: 1px solid rgba(255,255,255,.06);
+}
 h1 { margin: 0; font-weight: 700; letter-spacing: .3px; }
 .controls { display: grid; gap: .5rem; grid-template-columns: 1fr auto; align-items: center; }
-#search { width: 100%; padding: .7rem .9rem; border-radius: 10px; border: 1px solid rgba(255,255,255,.12); background: #0b1220; color: var(--fg); outline: none; }
+#search {
+  width: 100%; padding: .7rem .9rem; border-radius: 10px; border: 1px solid rgba(255,255,255,.12);
+  background: #0b1220; color: var(--fg); outline: none;
+}
 #search:focus { border-color: var(--ring); box-shadow: 0 0 0 3px rgba(29,78,216,.35); }
 .tabs { display: inline-flex; gap: .5rem; }
-.tabs button { background: #0b1220; color: var(--fg); border: 1px solid rgba(255,255,255,.12); padding: .55rem .8rem; border-radius: 10px; cursor: pointer; }
+.tabs button {
+  background: #0b1220; color: var(--fg); border: 1px solid rgba(255,255,255,.12);
+  padding: .55rem .8rem; border-radius: 10px; cursor: pointer;
+}
 .tabs button.active { border-color: var(--accent); color: var(--accent); }
 main { padding: 1rem; }
 .status { color: var(--muted); margin: .5rem 0 1rem; }
 .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
-.card { display: grid; gap: .5rem; padding: .8rem; border-radius: 14px; background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03)); border: 1px solid rgba(255,255,255,.1); }
-.cover-wrap { aspect-ratio: 3/4; background: #0b1220; border-radius: 10px; border: 1px solid rgba(255,255,255,.08); display: grid; place-items: center; overflow: hidden; }
+.card {
+  display: grid; gap: .5rem; padding: .8rem; border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03));
+  border: 1px solid rgba(255,255,255,.1); cursor: pointer;
+}
+.card:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.cover-wrap {
+  aspect-ratio: 3/4; background: #0b1220; border-radius: 10px; border: 1px solid rgba(255,255,255,.08);
+  display: grid; place-items: center; overflow: hidden;
+}
 .cover { width: 100%; height: 100%; object-fit: cover; }
 .title { margin: 0; font-size: .95rem; line-height: 1.2; }
 .author, .meta { margin: 0; color: var(--muted); font-size: .85rem; }
 @media (max-width: 640px) { .controls { grid-template-columns: 1fr; } }
+
+/* Modal */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,.55);
+  display: none; align-items: center; justify-content: center; z-index: 50;
+}
+.modal {
+  width: min(820px, 94vw); background: #0b1220; color: var(--fg); border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.12); box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  display: grid; grid-template-columns: 240px 1fr; gap: 1rem; overflow: hidden;
+}
+.modal .left { background: #0a0f1c; padding: 1rem; display: grid; place-items: center; }
+.modal .left img { width: 100%; height: auto; border-radius: 10px; border:1px solid rgba(255,255,255,.1); }
+.modal .right { padding: 1rem; display: grid; gap: .6rem; align-content: start; }
+.modal h3 { margin: 0; }
+.modal .muted { color: var(--muted); }
+.modal .row { display: grid; gap: .35rem; }
+.modal .actions { display: flex; gap: .5rem; margin-top: .5rem; }
+.btn {
+  background: var(--accent); color:#fff; border:none; padding:.6rem .9rem; border-radius:10px; cursor:pointer;
+}
+.btn.secondary { background: #1f2937; }
+.btn.danger { background: var(--danger); }
+.modal-close {
+  position: absolute; top: 10px; right: 10px; background: #111827; border:1px solid rgba(255,255,255,.12);
+  color:#fff; border-radius: 999px; width: 34px; height: 34px; cursor: pointer;
+}
+.modal-backdrop.show { display: flex; }
+@media (max-width: 720px) {
+  .modal { grid-template-columns: 1fr; }
+}
 </style>
 </head>
 <body>
 <header class="top">
   <h1>Showcase Library</h1>
   <div class="controls">
-    <input id="search" type="search" placeholder="Search by title or author (fetched)..." />
+    <input id="search" type="search" placeholder="Search fetched title/author..." />
     <div class="tabs">
       <button data-filter="all" class="active">All</button>
       <button data-filter="Fiction">Fiction</button>
@@ -45,11 +94,11 @@ main { padding: 1rem; }
 
 <main>
   <div id="status" class="status">Loading 50 items…</div>
-  <section id="grid" class="grid"></section>
+  <section id="grid" class="grid" aria-live="polite"></section>
 </main>
 
 <template id="card-tpl">
-  <article class="card">
+  <article class="card" tabindex="0">
     <div class="cover-wrap">
       <img class="cover" alt="Book cover" loading="lazy" />
     </div>
@@ -59,26 +108,48 @@ main { padding: 1rem; }
   </article>
 </template>
 
+<!-- Modal -->
+<div id="modalRoot" class="modal-backdrop" aria-hidden="true">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+    <button class="modal-close" aria-label="Close" id="closeBtn">✕</button>
+    <div class="left"><img id="mCover" alt="Selected cover"></div>
+    <div class="right">
+      <div class="row">
+        <h3 id="mTitle">Loading…</h3>
+        <div id="mAuthor" class="muted"></div>
+      </div>
+      <div class="row muted">
+        <div id="mISBN"></div>
+        <div id="mCategory"></div>
+      </div>
+      <div class="row">
+        <div class="muted" id="mNote">Request this item from the library desk or proceed to rent if integrated.</div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="rentBtn">Rent this book</button>
+        <button class="btn secondary" id="cancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
-/* Single-file showcase that renders 50 ISBN-13 entries.
-   Nothing except ISBNs is hardcoded; title/author/cover are fetched at runtime.
-   Data sources:
-   - Open Library Books API (metadata by ISBN): https://openlibrary.org/api/books?bibkeys=ISBN:{ISBN}&format=json&jscmd=data
-   - Open Library Covers API (cover by ISBN): https://covers.openlibrary.org/b/isbn/{ISBN}-M.jpg?default=false
-   - Google Books Volumes API (fallback metadata/thumbnail): https://www.googleapis.com/books/v1/volumes?q=isbn:{ISBN}
+/* Data sources:
+   - Open Library Books API (jscmd=data) for title/authors via ISBN: https://openlibrary.org/api/books?bibkeys=ISBN:{ISBN}&format=json&jscmd=data
+   - Open Library Covers API for covers by ISBN (S/M/L): https://covers.openlibrary.org/b/isbn/{ISBN}-{SIZE}.jpg?default=false
+   - Google Books Volumes API fallback for title/author/thumbnail: https://www.googleapis.com/books/v1/volumes?q=isbn:{ISBN}
+   These endpoints are public and documented for low‑volume client use. [Docs references in accompanying notes]
 */
 
-/* 50 ISBN-13 values:
-   First 25 are treated as 'Fiction', next 25 as 'Non-fiction'.
-   No titles/authors appear in the source; they are resolved via APIs at runtime. */
+/* 50 ISBN-13 values: first 25 considered Fiction, next 25 Non‑fiction (no titles/authors in source) */
 const ISBN_LIST = [
-  // 25 Fiction
+  // Fiction (25)
   "9780141439518","9780451524935","9780061120084","9780743273565","9780142437247",
   "9781400079988","9780679734505","9780141441146","9780141439556","9780316769488",
   "9780618640157","9780547928227","9780060850524","9780451526342","9781594631931",
   "9780061122415","9780385490818","9780064471046","9780141439600","9780141439563",
   "9780141439570","9780156028356","9780544103757","9780307387899","9780156001311",
-  // 25 Non-fiction
+  // Non‑fiction (25)
   "9780062316110","9780399590504","9781524763138","9780812981605","9780374533557",
   "9780735211292","9780316010665","9780316017930","9780198788607","9780553380163",
   "9781400052189","9780393317558","9781439170915","9780807014271","9780385486804",
@@ -86,7 +157,9 @@ const ISBN_LIST = [
   "9780060731335","9780743269513","9780399588174","9780385349949","9780812993547"
 ];
 
-const FICTION_COUNT = 25; // index < 25 => Fiction, else Non-fiction
+const FICTION_COUNT = 25;
+const placeholder = 'https://via.placeholder.com/360x480/0b1220/9ca3af?text=No+Cover';
+
 const grid = document.getElementById('grid');
 const statusEl = document.getElementById('status');
 const tpl = document.getElementById('card-tpl');
@@ -94,74 +167,68 @@ const tpl = document.getElementById('card-tpl');
 const searchEl = document.getElementById('search');
 const tabBtns = document.querySelectorAll('.tabs button');
 
-let filter = 'all'; // 'all' | 'Fiction' | 'Non-fiction'
-let query = '';     // user search (applies to fetched title/author text)
+/* Modal elements */
+const modalRoot = document.getElementById('modalRoot');
+const mTitle = document.getElementById('mTitle');
+const mAuthor = document.getElementById('mAuthor');
+const mCover = document.getElementById('mCover');
+const mISBN = document.getElementById('mISBN');
+const mCategory = document.getElementById('mCategory');
+const rentBtn = document.getElementById('rentBtn');
+const cancelBtn = document.getElementById('cancelBtn');
+const closeBtn = document.getElementById('closeBtn');
 
-const placeholder = 'https://via.placeholder.com/360x480/0b1220/9ca3af?text=No+Cover';
+/* Optional backend integration: set to your API endpoint to POST rentals by ISBN, or keep null for demo alert */
+const RENT_ENDPOINT = null; // e.g., "/api/lendings/isbn"
 
-/* Build Open Library cover URL for an ISBN (size S|M|L), using default=false to detect missing covers via 404 */
+/* Store resolved records for quick lookup by ISBN */
+const resolved = new Map();
+
+let filter = 'all';
+let query = '';
+
 function olCover(isbn, size='M') {
   return `https://covers.openlibrary.org/b/isbn/${isbn}-${size}.jpg?default=false`;
 }
 
-/* Fetch metadata from Open Library Books API (title/authors/cover) */
 async function olMeta(isbn) {
   const url = `https://openlibrary.org/api/books?bibkeys=ISBN:${encodeURIComponent(isbn)}&format=json&jscmd=data`;
   const r = await fetch(url);
   if (!r.ok) return null;
   const data = await r.json();
-  const key = `ISBN:${isbn}`;
-  const item = data[key];
+  const item = data[`ISBN:${isbn}`];
   if (!item) return null;
   const title = item.title || '';
   const author = (item.authors && item.authors[0] && item.authors[0].name) ? item.authors[0].name : '';
-  // Prefer Covers API; OL metadata may also contain item.cover.medium
   return { title, author };
 }
 
-/* Fallback metadata/thumbnail from Google Books by ISBN */
 async function googleMeta(isbn) {
-  const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}`;
-  const r = await fetch(url);
+  const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}`);
   if (!r.ok) return null;
   const data = await r.json();
   const item = (data.items && data.items[0]) || null;
   if (!item) return null;
   const info = item.volumeInfo || {};
-  return {
-    title: info.title || '',
-    author: (info.authors && info.authors[0]) ? info.authors[0] : '',
-    thumb: info.imageLinks && (info.imageLinks.thumbnail || info.imageLinks.smallThumbnail) || null
-  };
+  const thumb = info.imageLinks && (info.imageLinks.thumbnail || info.imageLinks.smallThumbnail) || null;
+  return { title: info.title || '', author: (info.authors && info.authors[0]) || '', thumb };
 }
 
-/* HEAD probe to see if a cover exists at Open Library */
-async function hasCover(url) {
-  try {
-    const r = await fetch(url, { method: 'HEAD' });
-    return r.ok;
-  } catch {
-    return false;
-  }
+async function headOk(url) {
+  try { const r = await fetch(url, { method:'HEAD' }); return r.ok; } catch { return false; }
 }
 
-/* Resolve one ISBN into display data: {title, author, coverUrl, category} */
 async function resolveISBN(isbn, idx) {
   const category = idx < FICTION_COUNT ? 'Fiction' : 'Non-fiction';
+  let title = '', author = '', coverUrl = null;
 
-  // 1) Try OL metadata
-  let title = '', author = '';
   try {
-    const meta = await olMeta(isbn);
-    if (meta) { title = meta.title; author = meta.author; }
+    const meta = await olMeta(isbn); if (meta) { title = meta.title; author = meta.author; }
   } catch {}
 
-  // 2) Prefer OL cover if available
   const ol = olCover(isbn, 'M');
-  let coverUrl = null;
-  if (await hasCover(ol)) coverUrl = ol;
+  if (await headOk(ol)) coverUrl = ol;
 
-  // 3) If anything missing, use Google fallback
   if ((!title || !author) || !coverUrl) {
     try {
       const g = await googleMeta(isbn);
@@ -173,90 +240,124 @@ async function resolveISBN(isbn, idx) {
     } catch {}
   }
 
-  // 4) Finalize with placeholders
   if (!coverUrl) coverUrl = placeholder;
 
   return { isbn, title, author, coverUrl, category };
 }
 
-/* Render a card into the grid */
-function renderCard(data) {
+function skeletonCard(isbn, idx) {
   const node = tpl.content.cloneNode(true);
-  const img = node.querySelector('.cover');
-  node.querySelector('.title').textContent = data.title || '(title unavailable)';
-  node.querySelector('.author').textContent = data.author || '';
-  node.querySelector('.meta').textContent = `${data.category} • ${data.isbn}`;
-  img.src = data.coverUrl;
-  img.alt = `${data.isbn} cover`;
-  node.firstElementChild.dataset.title = (data.title || '').toLowerCase();
-  node.firstElementChild.dataset.author = (data.author || '').toLowerCase();
-  node.firstElementChild.dataset.category = data.category;
+  const card = node.firstElementChild;
+  card.dataset.isbn = isbn;
+  card.dataset.category = idx < FICTION_COUNT ? 'Fiction' : 'Non-fiction';
+  card.dataset.title = '';
+  card.dataset.author = '';
+  card.querySelector('.title').textContent = 'Loading…';
+  card.querySelector('.author').textContent = '';
+  card.querySelector('.meta').textContent = `${card.dataset.category} • ${isbn}`;
+  card.querySelector('.cover').src = placeholder;
+  card.addEventListener('click', () => openModal(isbn));
+  card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openModal(isbn); } });
   grid.appendChild(node);
 }
 
-/* Filter visible cards by search query and category */
+function updateCard(data) {
+  const card = grid.querySelector(`.card[data-isbn="${CSS.escape(data.isbn)}"]`);
+  if (!card) return;
+  card.querySelector('.title').textContent = data.title || '(title unavailable)';
+  card.querySelector('.author').textContent = data.author || '';
+  card.querySelector('.meta').textContent = `${data.category} • ${data.isbn}`;
+  const img = card.querySelector('.cover'); img.src = data.coverUrl; img.alt = `${data.isbn} cover`;
+  card.dataset.title = (data.title || '').toLowerCase();
+  card.dataset.author = (data.author || '').toLowerCase();
+}
+
 function applyFilters() {
-  const cards = grid.querySelectorAll('.card');
   const q = query.trim().toLowerCase();
-  cards.forEach(card => {
-    const okCat = (filter === 'all') || (card.dataset.category === filter);
-    const txtMatch = !q || card.dataset.title.includes(q) || card.dataset.author.includes(q);
-    card.style.display = (okCat && txtMatch) ? '' : 'none';
+  grid.querySelectorAll('.card').forEach(card => {
+    const okCat = filter === 'all' || card.dataset.category === filter;
+    const okTxt = !q || card.dataset.title.includes(q) || card.dataset.author.includes(q);
+    card.style.display = (okCat && okTxt) ? '' : 'none';
   });
 }
 
-/* Gentle concurrency to avoid hammering public APIs */
 async function hydrateAll() {
   statusEl.textContent = 'Fetching metadata & covers…';
   grid.innerHTML = '';
-
-  // Pre-create skeletons so layout fills progressively
-  for (let i = 0; i < ISBN_LIST.length; i++) {
-    renderCard({ isbn: ISBN_LIST[i], title: 'Loading…', author: '', coverUrl: placeholder, category: (i < FICTION_COUNT ? 'Fiction' : 'Non-fiction') });
-  }
-
-  const cards = Array.from(grid.querySelectorAll('.card'));
-  const batch = 5;
+  // skeletons
+  ISBN_LIST.forEach((isbn, idx) => skeletonCard(isbn, idx));
+  // gentle concurrency
+  const batch = 6;
   for (let i = 0; i < ISBN_LIST.length; i += batch) {
-    const tasks = ISBN_LIST.slice(i, i + batch).map(async (isbn, offset) => {
-      const idx = i + offset;
+    const jobs = ISBN_LIST.slice(i, i + batch).map(async (isbn, off) => {
+      const idx = i + off;
       const data = await resolveISBN(isbn, idx);
-
-      // Update existing card content
-      const card = cards[idx];
-      if (card) {
-        card.querySelector('.title').textContent = data.title || '(title unavailable)';
-        card.querySelector('.author').textContent = data.author || '';
-        card.querySelector('.meta').textContent = `${data.category} • ${data.isbn}`;
-        const img = card.querySelector('.cover');
-        img.src = data.coverUrl;
-        img.alt = `${data.isbn} cover`;
-        card.dataset.title = (data.title || '').toLowerCase();
-        card.dataset.author = (data.author || '').toLowerCase();
-        card.dataset.category = data.category;
-      }
+      resolved.set(isbn, data);
+      updateCard(data);
     });
-    await Promise.all(tasks);
-    await new Promise(r => setTimeout(r, 150));
+    await Promise.all(jobs);
+    await new Promise(r => setTimeout(r, 140));
   }
   statusEl.textContent = 'Loaded.';
   applyFilters();
 }
 
-/* UI wiring */
-document.querySelectorAll('.tabs button').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    filter = btn.dataset.filter;
-    applyFilters();
-  });
-});
+/* Modal logic */
+function openModal(isbn) {
+  const data = resolved.get(isbn);
+  if (!data) return;
+  mTitle.textContent = data.title || '(title unavailable)';
+  mAuthor.textContent = data.author || '';
+  mCover.src = data.coverUrl || placeholder;
+  mCover.alt = `${isbn} cover`;
+  mISBN.textContent = `ISBN: ${isbn}`;
+  mCategory.textContent = `Category: ${data.category}`;
+  rentBtn.onclick = () => rentBook(isbn);
+  modalRoot.classList.add('show');
+  modalRoot.setAttribute('aria-hidden', 'false');
+  // focus management
+  rentBtn.focus();
+}
 
-document.getElementById('search').addEventListener('input', (e) => {
-  query = e.target.value || '';
+function closeModal() {
+  modalRoot.classList.remove('show');
+  modalRoot.setAttribute('aria-hidden', 'true');
+}
+
+modalRoot.addEventListener('click', (e) => { if (e.target === modalRoot) closeModal(); });
+cancelBtn.addEventListener('click', closeModal);
+closeBtn.addEventListener('click', closeModal);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+/* Rent action – demo alert by default, or POST to backend if RENT_ENDPOINT is set */
+async function rentBook(isbn) {
+  if (!RENT_ENDPOINT) {
+    alert(`Request to rent ISBN ${isbn} has been noted (demo).`);
+    closeModal();
+    return;
+  }
+  try {
+    const r = await fetch(RENT_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isbn })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    alert('Rental request submitted.');
+    closeModal();
+  } catch (e) {
+    alert('Rental failed: ' + (e.message || 'unknown error'));
+  }
+}
+
+/* UI events */
+tabBtns.forEach(btn => btn.addEventListener('click', () => {
+  tabBtns.forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  filter = btn.dataset.filter;
   applyFilters();
-});
+}));
+searchEl.addEventListener('input', () => { query = searchEl.value || ''; applyFilters(); });
 
 /* Start */
 hydrateAll();
