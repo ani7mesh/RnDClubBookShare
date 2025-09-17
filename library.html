@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Showcase Library • 50 ISBNs</title>
+<style>
+:root {
+  --bg: #0f172a; --panel: #111827; --card: #0b1220; --fg: #e5e7eb; --muted:#9ca3af; --accent:#60a5fa; --ring:#1d4ed8;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Arial, sans-serif; background: radial-gradient(1200px 800px at 70% -10%, #1f2937 0%, #0f172a 60%); color: var(--fg); }
+header.top { position: sticky; top: 0; z-index: 10; display: grid; gap: .75rem; padding: 1rem; background: rgba(17,24,39,.7); backdrop-filter: blur(8px); border-bottom: 1px solid rgba(255,255,255,.06); }
+h1 { margin: 0; font-weight: 700; letter-spacing: .3px; }
+.controls { display: grid; gap: .5rem; grid-template-columns: 1fr auto; align-items: center; }
+#search { width: 100%; padding: .7rem .9rem; border-radius: 10px; border: 1px solid rgba(255,255,255,.12); background: #0b1220; color: var(--fg); outline: none; }
+#search:focus { border-color: var(--ring); box-shadow: 0 0 0 3px rgba(29,78,216,.35); }
+.tabs { display: inline-flex; gap: .5rem; }
+.tabs button { background: #0b1220; color: var(--fg); border: 1px solid rgba(255,255,255,.12); padding: .55rem .8rem; border-radius: 10px; cursor: pointer; }
+.tabs button.active { border-color: var(--accent); color: var(--accent); }
+main { padding: 1rem; }
+.status { color: var(--muted); margin: .5rem 0 1rem; }
+.grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.card { display: grid; gap: .5rem; padding: .8rem; border-radius: 14px; background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.03)); border: 1px solid rgba(255,255,255,.1); }
+.cover-wrap { aspect-ratio: 3/4; background: #0b1220; border-radius: 10px; border: 1px solid rgba(255,255,255,.08); display: grid; place-items: center; overflow: hidden; }
+.cover { width: 100%; height: 100%; object-fit: cover; }
+.title { margin: 0; font-size: .95rem; line-height: 1.2; }
+.author, .meta { margin: 0; color: var(--muted); font-size: .85rem; }
+@media (max-width: 640px) { .controls { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Showcase Library</h1>
+  <div class="controls">
+    <input id="search" type="search" placeholder="Search by title or author (fetched)..." />
+    <div class="tabs">
+      <button data-filter="all" class="active">All</button>
+      <button data-filter="Fiction">Fiction</button>
+      <button data-filter="Non-fiction">Non‑fiction</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div id="status" class="status">Loading 50 items…</div>
+  <section id="grid" class="grid"></section>
+</main>
+
+<template id="card-tpl">
+  <article class="card">
+    <div class="cover-wrap">
+      <img class="cover" alt="Book cover" loading="lazy" />
+    </div>
+    <h3 class="title"></h3>
+    <p class="author"></p>
+    <p class="meta"></p>
+  </article>
+</template>
+
+<script>
+/* Single-file showcase that renders 50 ISBN-13 entries.
+   Nothing except ISBNs is hardcoded; title/author/cover are fetched at runtime.
+   Data sources:
+   - Open Library Books API (metadata by ISBN): https://openlibrary.org/api/books?bibkeys=ISBN:{ISBN}&format=json&jscmd=data
+   - Open Library Covers API (cover by ISBN): https://covers.openlibrary.org/b/isbn/{ISBN}-M.jpg?default=false
+   - Google Books Volumes API (fallback metadata/thumbnail): https://www.googleapis.com/books/v1/volumes?q=isbn:{ISBN}
+*/
+
+/* 50 ISBN-13 values:
+   First 25 are treated as 'Fiction', next 25 as 'Non-fiction'.
+   No titles/authors appear in the source; they are resolved via APIs at runtime. */
+const ISBN_LIST = [
+  // 25 Fiction
+  "9780141439518","9780451524935","9780061120084","9780743273565","9780142437247",
+  "9781400079988","9780679734505","9780141441146","9780141439556","9780316769488",
+  "9780618640157","9780547928227","9780060850524","9780451526342","9781594631931",
+  "9780061122415","9780385490818","9780064471046","9780141439600","9780141439563",
+  "9780141439570","9780156028356","9780544103757","9780307387899","9780156001311",
+  // 25 Non-fiction
+  "9780062316110","9780399590504","9781524763138","9780812981605","9780374533557",
+  "9780735211292","9780316010665","9780316017930","9780198788607","9780553380163",
+  "9781400052189","9780393317558","9781439170915","9780807014271","9780385486804",
+  "9781476728759","9781476733524","9780307352156","9781524731656","9780316346627",
+  "9780060731335","9780743269513","9780399588174","9780385349949","9780812993547"
+];
+
+const FICTION_COUNT = 25; // index < 25 => Fiction, else Non-fiction
+const grid = document.getElementById('grid');
+const statusEl = document.getElementById('status');
+const tpl = document.getElementById('card-tpl');
+
+const searchEl = document.getElementById('search');
+const tabBtns = document.querySelectorAll('.tabs button');
+
+let filter = 'all'; // 'all' | 'Fiction' | 'Non-fiction'
+let query = '';     // user search (applies to fetched title/author text)
+
+const placeholder = 'https://via.placeholder.com/360x480/0b1220/9ca3af?text=No+Cover';
+
+/* Build Open Library cover URL for an ISBN (size S|M|L), using default=false to detect missing covers via 404 */
+function olCover(isbn, size='M') {
+  return `https://covers.openlibrary.org/b/isbn/${isbn}-${size}.jpg?default=false`;
+}
+
+/* Fetch metadata from Open Library Books API (title/authors/cover) */
+async function olMeta(isbn) {
+  const url = `https://openlibrary.org/api/books?bibkeys=ISBN:${encodeURIComponent(isbn)}&format=json&jscmd=data`;
+  const r = await fetch(url);
+  if (!r.ok) return null;
+  const data = await r.json();
+  const key = `ISBN:${isbn}`;
+  const item = data[key];
+  if (!item) return null;
+  const title = item.title || '';
+  const author = (item.authors && item.authors[0] && item.authors[0].name) ? item.authors[0].name : '';
+  // Prefer Covers API; OL metadata may also contain item.cover.medium
+  return { title, author };
+}
+
+/* Fallback metadata/thumbnail from Google Books by ISBN */
+async function googleMeta(isbn) {
+  const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}`;
+  const r = await fetch(url);
+  if (!r.ok) return null;
+  const data = await r.json();
+  const item = (data.items && data.items[0]) || null;
+  if (!item) return null;
+  const info = item.volumeInfo || {};
+  return {
+    title: info.title || '',
+    author: (info.authors && info.authors[0]) ? info.authors[0] : '',
+    thumb: info.imageLinks && (info.imageLinks.thumbnail || info.imageLinks.smallThumbnail) || null
+  };
+}
+
+/* HEAD probe to see if a cover exists at Open Library */
+async function hasCover(url) {
+  try {
+    const r = await fetch(url, { method: 'HEAD' });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+/* Resolve one ISBN into display data: {title, author, coverUrl, category} */
+async function resolveISBN(isbn, idx) {
+  const category = idx < FICTION_COUNT ? 'Fiction' : 'Non-fiction';
+
+  // 1) Try OL metadata
+  let title = '', author = '';
+  try {
+    const meta = await olMeta(isbn);
+    if (meta) { title = meta.title; author = meta.author; }
+  } catch {}
+
+  // 2) Prefer OL cover if available
+  const ol = olCover(isbn, 'M');
+  let coverUrl = null;
+  if (await hasCover(ol)) coverUrl = ol;
+
+  // 3) If anything missing, use Google fallback
+  if ((!title || !author) || !coverUrl) {
+    try {
+      const g = await googleMeta(isbn);
+      if (g) {
+        if (!title) title = g.title || title;
+        if (!author) author = g.author || author;
+        if (!coverUrl && g.thumb) coverUrl = g.thumb;
+      }
+    } catch {}
+  }
+
+  // 4) Finalize with placeholders
+  if (!coverUrl) coverUrl = placeholder;
+
+  return { isbn, title, author, coverUrl, category };
+}
+
+/* Render a card into the grid */
+function renderCard(data) {
+  const node = tpl.content.cloneNode(true);
+  const img = node.querySelector('.cover');
+  node.querySelector('.title').textContent = data.title || '(title unavailable)';
+  node.querySelector('.author').textContent = data.author || '';
+  node.querySelector('.meta').textContent = `${data.category} • ${data.isbn}`;
+  img.src = data.coverUrl;
+  img.alt = `${data.isbn} cover`;
+  node.firstElementChild.dataset.title = (data.title || '').toLowerCase();
+  node.firstElementChild.dataset.author = (data.author || '').toLowerCase();
+  node.firstElementChild.dataset.category = data.category;
+  grid.appendChild(node);
+}
+
+/* Filter visible cards by search query and category */
+function applyFilters() {
+  const cards = grid.querySelectorAll('.card');
+  const q = query.trim().toLowerCase();
+  cards.forEach(card => {
+    const okCat = (filter === 'all') || (card.dataset.category === filter);
+    const txtMatch = !q || card.dataset.title.includes(q) || card.dataset.author.includes(q);
+    card.style.display = (okCat && txtMatch) ? '' : 'none';
+  });
+}
+
+/* Gentle concurrency to avoid hammering public APIs */
+async function hydrateAll() {
+  statusEl.textContent = 'Fetching metadata & covers…';
+  grid.innerHTML = '';
+
+  // Pre-create skeletons so layout fills progressively
+  for (let i = 0; i < ISBN_LIST.length; i++) {
+    renderCard({ isbn: ISBN_LIST[i], title: 'Loading…', author: '', coverUrl: placeholder, category: (i < FICTION_COUNT ? 'Fiction' : 'Non-fiction') });
+  }
+
+  const cards = Array.from(grid.querySelectorAll('.card'));
+  const batch = 5;
+  for (let i = 0; i < ISBN_LIST.length; i += batch) {
+    const tasks = ISBN_LIST.slice(i, i + batch).map(async (isbn, offset) => {
+      const idx = i + offset;
+      const data = await resolveISBN(isbn, idx);
+
+      // Update existing card content
+      const card = cards[idx];
+      if (card) {
+        card.querySelector('.title').textContent = data.title || '(title unavailable)';
+        card.querySelector('.author').textContent = data.author || '';
+        card.querySelector('.meta').textContent = `${data.category} • ${data.isbn}`;
+        const img = card.querySelector('.cover');
+        img.src = data.coverUrl;
+        img.alt = `${data.isbn} cover`;
+        card.dataset.title = (data.title || '').toLowerCase();
+        card.dataset.author = (data.author || '').toLowerCase();
+        card.dataset.category = data.category;
+      }
+    });
+    await Promise.all(tasks);
+    await new Promise(r => setTimeout(r, 150));
+  }
+  statusEl.textContent = 'Loaded.';
+  applyFilters();
+}
+
+/* UI wiring */
+document.querySelectorAll('.tabs button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    filter = btn.dataset.filter;
+    applyFilters();
+  });
+});
+
+document.getElementById('search').addEventListener('input', (e) => {
+  query = e.target.value || '';
+  applyFilters();
+});
+
+/* Start */
+hydrateAll();
+</script>
+</body>
+</html>
