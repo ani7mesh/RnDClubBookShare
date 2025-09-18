@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Minimalist Fractal Background</title>
+  <title>Minimalist Line Fractal (Marching Squares)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     html, body {
@@ -14,7 +14,7 @@
     }
     canvas {
       position: fixed;
-      top: 0; left: 0;
+      inset: 0;
       width: 100vw; height: 100vh; /* CSS size */
       background: #000;
       display: block;
@@ -28,13 +28,14 @@
     const canvas = document.getElementById('bg');
     const ctx = canvas.getContext('2d', { alpha: false });
 
-    // Backing-store pixel size to match devicePixelRatio
+    // Backing-store sizing for HiDPI
     function resize() {
       const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
       const rect = canvas.getBoundingClientRect();
       canvas.width = Math.round(rect.width * dpr);
       canvas.height = Math.round(rect.height * dpr);
-      // For pixel ops, use native pixels: no ctx.scale here
+      // Normalize drawing to CSS pixels
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
     window.addEventListener('resize', resize, { passive: true });
     window.addEventListener('orientationchange', resize, { passive: true });
@@ -50,137 +51,195 @@
 
     // Map from screen to complex plane
     function viewParams() {
-      const W = canvas.width, H = canvas.height;
+      // Work in CSS pixels (because ctx is transformed)
+      const W = canvas.getBoundingClientRect().width | 0;
+      const H = canvas.getBoundingClientRect().height | 0;
       const aspect = W / H;
-      // Dynamic view: Mandelbrot uses [-2..1] base, Julia a bit tighter
       const base = (mode === 'mandelbrot') ? 1.4 : 1.2;
       const vy = base / zoom;
       const vx = vy * aspect;
       return { W, H, vx, vy };
     }
 
-    // Smooth coloring helper (HSV -> RGB)
-    function hsvToRgb(h, s, v) {
-      h = (h % 1 + 1) % 1;
-      let r=0, g=0, b=0;
-      const i = Math.floor(h * 6);
-      const f = h * 6 - i;
-      const p = v * (1 - s);
-      const q = v * (1 - f * s);
-      const t = v * (1 - (1 - f) * s);
-      switch (i % 6) {
-        case 0: r=v, g=t, b=p; break;
-        case 1: r=q, g=v, b=p; break;
-        case 2: r=p, g=v, b=t; break;
-        case 3: r=p, g=q, b=v; break;
-        case 4: r=t, g=p, b=v; break;
-        case 5: r=v, g=p, b=q; break;
+    // Smooth coloring helper: compute smooth escape value in [0,1]
+    function sampleValue(x0, y0, cRe, cIm, bailoutSq, maxIterLocal) {
+      let zx, zy, cre, cim;
+      if (mode === 'mandelbrot') {
+        zx = 0.0; zy = 0.0;
+        cre = x0; cim = y0;
+      } else {
+        zx = x0; zy = y0;
+        cre = cRe; cim = cIm;
       }
-      return [Math.round(r*255), Math.round(g*255), Math.round(b*255)];
+      let iter = 0;
+      for (; iter < maxIterLocal; iter++) {
+        const xx = zx*zx - zy*zy + cre;
+        const yy = 2*zx*zy + cim;
+        zx = xx; zy = yy;
+        if (zx*zx + zy*zy > bailoutSq) break;
+      }
+      if (iter === maxIterLocal) return 1.0; // interior
+      // smooth iteration: mu = k + 1 - log(log|z|)/log2
+      const mag2 = zx*zx + zy*zy;
+      const log_zn = Math.log(mag2) / 2;
+      const nu = Math.log(log_zn / Math.log(2)) / Math.log(2);
+      const mu = iter + 1 - nu;
+      const v = mu / maxIterLocal;
+      return Math.max(0, Math.min(1, v));
     }
 
-    // Render one frame of fractal
-    function renderFractal(t) {
-      const { W, H, vx, vy } = viewParams();
-      const imageData = ctx.createImageData(W, H);
-      const data = imageData.data;
+    // Marching Squares isolines for a scalar field
+    function drawIsolines(field, cols, rows, step, levels) {
+      // Edge interpolation inside cell at grid (gx, gy)
+      function edgePoint(gx, gy, edge, iso) {
+        // corners: c0=(gx,gy) TL, c1=(gx+1,gy) TR, c2=(gx+1,gy+1) BR, c3=(gx,gy+1) BL
+        const i00 = gy*(cols+1) + gx;
+        const i10 = gy*(cols+1) + (gx+1);
+        const i11 = (gy+1)*(cols+1) + (gx+1);
+        const i01 = (gy+1)*(cols+1) + gx;
 
-      // Time-based Julia parameter
-      // Animate c on a small circle unless mouse is used
-      const time = (t || 0) * 0.00025;
+        const v00 = field[i00], v10 = field[i10], v11 = field[i11], v01 = field[i01];
+
+        const x = gx * step,     y = gy * step;
+        const x1 = (gx+1) * step, y1 = (gy+1) * step;
+
+        // linear interpolation helper
+        function lerp(ax, ay, bx, by, va, vb) {
+          const t = (iso - va) / (vb - va);
+          return [ax + t*(bx - ax), ay + t*(by - ay)];
+        }
+        switch (edge) {
+          case 0: return lerp(x, y, x1, y, v00, v10);      // top: c0-c1
+          case 1: return lerp(x1, y, x1, y1, v10, v11);    // right: c1-c2
+          case 2: return lerp(x1, y1, x, y1, v11, v01);    // bottom: c2-c3
+          case 3: return lerp(x, y1, x, y, v01, v00);      // left: c3-c0
+        }
+        return [x, y];
+      }
+
+      // Standard marching squares lookup for non-ambiguous cases
+      const LUT = {
+        0:  [], 1:  [[3,0]], 2:  [[0,1]], 3:  [[3,1]],
+        4:  [[1,2]], 5:  null, 6:  [[0,2]], 7:  [[3,2]],
+        8:  [[2,3]], 9:  [[0,2]], 10: null, 11: [[1,2]],
+        12: [[1,3]], 13: [[0,1]], 14: [[3,0]], 15: []
+      };
+
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = '#ffffff';
+      ctx.globalAlpha = 0.9;
+
+      for (let li = 0; li < levels.length; li++) {
+        const iso = levels[li];
+        ctx.beginPath();
+        for (let gy = 0; gy < rows; gy++) {
+          for (let gx = 0; gx < cols; gx++) {
+            const i00 = gy*(cols+1) + gx;
+            const i10 = gy*(cols+1) + (gx+1);
+            const i11 = (gy+1)*(cols+1) + (gx+1);
+            const i01 = (gy+1)*(cols+1) + gx;
+
+            const v00 = field[i00], v10 = field[i10], v11 = field[i11], v01 = field[i01];
+
+            let mask = 0;
+            if (v00 > iso) mask |= 1;
+            if (v10 > iso) mask |= 2;
+            if (v11 > iso) mask |= 4;
+            if (v01 > iso) mask |= 8;
+
+            if (mask === 0 || mask === 15) continue;
+
+            let segments = LUT[mask];
+            if (!segments) {
+              // Resolve ambiguous cases (5,10) using cell center value
+              const center = 0.25*(v00 + v10 + v11 + v01);
+              if (mask === 5) {
+                segments = (center > iso) ? [[0,1],[2,3]] : [[3,0],[1,2]];
+              } else if (mask === 10) {
+                segments = (center > iso) ? [[0,3],[1,2]] : [[0,1],[2,3]];
+              }
+            }
+
+            for (let s = 0; s < segments.length; s++) {
+              const [eA, eB] = segments[s];
+              const [ax, ay] = edgePoint(gx, gy, eA, iso);
+              const [bx, by] = edgePoint(gx, gy, eB, iso);
+              ctx.moveTo(ax, ay);
+              ctx.lineTo(bx, by);
+            }
+          }
+        }
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1.0;
+    }
+
+    // Animation frame
+    function render(ts) {
+      const { W, H, vx, vy } = viewParams();
+
+      // Clear to black (opaque)
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, W, H);
+
+      // Time-based Julia parameter (or mouse-driven)
+      const time = (ts || 0) * 0.00025;
       let cRe, cIm;
       if (autoC) {
-        const r = 0.7885; // within connected sets for rich structure
+        const r = 0.7885;
         cRe = r * Math.cos(time * 4.0);
         cIm = r * Math.sin(time * 3.0);
       } else {
-        // Map last mouse position (-1..1 range) to c
         cRe = mouseX * 1.25;
         cIm = mouseY * 1.25;
       }
 
-      // Precompute center differently per mode
-      const cx = centerX;
-      const cy = centerY;
+      // Grid sampling (CSS pixels)
+      const STEP = 4; // increase for speed, decrease for more detail
+      const cols = Math.max(1, Math.floor(W / STEP));
+      const rows = Math.max(1, Math.floor(H / STEP));
+      const field = new Float32Array((cols + 1) * (rows + 1));
 
-      // Iterate pixels
-      // Bailout radius squared
-      const bailout = 4.0;
+      const bailoutSq = 4.0;
+      const maxIterLocal = maxIter;
 
-      let p = 0;
-      for (let j = 0; j < H; j++) {
-        const y0 = cy + (j / H - 0.5) * 2 * vy;
-        for (let i = 0; i < W; i++) {
-          const x0 = cx + (i / W - 0.5) * 2 * vx;
-
-          let zx, zy, cre, cim;
-
-          if (mode === 'mandelbrot') {
-            // z starts at 0, c is pixel
-            zx = 0.0; zy = 0.0;
-            cre = x0; cim = y0;
-          } else {
-            // Julia: z is pixel, c is global
-            zx = x0; zy = y0;
-            cre = cRe; cim = cIm;
-          }
-
-          let iter = 0;
-          let zx2 = 0.0, zy2 = 0.0;
-          for (; iter < maxIter; iter++) {
-            // z = z^2 + c
-            // (zx + i zy)^2 = (zx^2 - zy^2) + i(2 zx zy)
-            zx2 = zx*zx - zy*zy + cre;
-            zy2 = 2*zx*zy + cim;
-            zx = zx2; zy = zy2;
-
-            // Escape test |z|^2 > 4
-            if (zx*zx + zy*zy > bailout) break;
-          }
-
-          // Smooth iteration count (mu)
-          let mu;
-          if (iter === maxIter) {
-            mu = iter;
-          } else {
-            // mu = k + 1 - log(log(|z|)) / log 2
-            const mag2 = zx*zx + zy*zy;
-            const log_zn = Math.log(mag2) / 2;
-            const nu = Math.log(log_zn / Math.log(2)) / Math.log(2);
-            mu = iter + 1 - nu;
-          }
-
-          // Color mapping
-          let r, g, b;
-          if (iter === maxIter) {
-            // Interior
-            r = g = b = 0;
-          } else {
-            // Palette: hue cycles with mu, slight accent on saturation
-            const hue = 0.85 + 0.035 * mu; // blue-violet range
-            const sat = 0.9;
-            const val = 0.95 - 0.35 * Math.exp(-0.02 * mu);
-            [r, g, b] = hsvToRgb(hue, sat, val);
-          }
-
-          data[p++] = r;
-          data[p++] = g;
-          data[p++] = b;
-          data[p++] = 255;
+      // Sample smooth escape values on grid vertices
+      for (let gy = 0; gy <= rows; gy++) {
+        const sy = gy * STEP;
+        const y0 = centerY + (sy / W * (W / H) - 0.5 * (W / H)) * 2 * vy; // map sy via H
+        for (let gx = 0; gx <= cols; gx++) {
+          const sx = gx * STEP;
+          const x0 = centerX + (sx / W - 0.5) * 2 * vx;
+          const idx = gy * (cols + 1) + gx;
+          // Correct y mapping uses H
+          const yMap = centerY + (sy / H - 0.5) * 2 * vy;
+          const value = sampleValue(x0, yMap, cRe, cIm, bailoutSq, maxIterLocal);
+          field[idx] = value;
         }
       }
 
-      ctx.putImageData(imageData, 0, 0);
+      // Choose contour levels (values in (0,1))
+      const levels = [];
+      const bands = 14; // number of line bands
+      for (let k = 0; k < bands; k++) {
+        // avoid 0 and 1 to keep lines near the boundary
+        levels.push((k + 1) / (bands + 2));
+      }
+
+      // Draw isolines
+      drawIsolines(field, cols, rows, STEP, levels);
     }
 
-    // Animation loop
+    // RAF loop
     function loop(ts) {
-      renderFractal(ts);
+      render(ts);
       requestAnimationFrame(loop);
     }
     requestAnimationFrame(loop);
 
-    // Optional: mouse influence for Julia c
+    // Mouse input for Julia parameter (when autoC = false)
     window.addEventListener('mousemove', (e) => {
       const rect = canvas.getBoundingClientRect();
       const nx = (e.clientX - rect.left) / rect.width;  // 0..1
@@ -189,7 +248,7 @@
       mouseY = (ny - 0.5) * 2; // -1..1
     }, { passive: true });
 
-    // Simple keyboard controls (window: canvas is pointer-events:none)
+    // Keyboard controls
     window.addEventListener('keydown', (e) => {
       if (e.key === 'j' || e.key === 'J') {
         mode = 'julia';
