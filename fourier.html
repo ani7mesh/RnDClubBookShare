@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Minimalist Fourier Background</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: #000;
+      overflow: hidden;
+      font-family: 'Inter', 'Roboto', Arial, sans-serif;
+    }
+    canvas {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      background: #000;
+      display: block;
+      z-index: -1;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="bg"></canvas>
+  <script>
+    const canvas = document.getElementById('bg');
+    const ctx = canvas.getContext('2d');
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Minimal signal (sum of sine waves)
+    function fourierPath(n, time, radius, cx, cy) {
+      const points = [];
+      for (let t = 0; t < n; t++) {
+        let angle = 2 * Math.PI * t / n;
+        // Minimalist composition: just a few harmonics
+        let x = cx + radius * (
+          Math.sin(angle + time*0.002) * 0.6 +
+          Math.sin(3*angle + time*0.004) * 0.3 +
+          Math.sin(7*angle - time*0.003) * 0.1
+        );
+        let y = cy + radius * (
+          Math.cos(angle - time*0.002) * 0.7 +
+          Math.cos(2*angle + time*0.004) * 0.2 +
+          Math.cos(6*angle - time*0.003) * 0.1
+        );
+        points.push([x, y]);
+      }
+      return points;
+    }
+
+    function draw(time) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.save();
+      ctx.strokeStyle = "yellow";
+      ctx.lineWidth = 1.2;
+      ctx.shadowColor = "rgba(255,255,0,0.07)";
+      ctx.shadowBlur = 10;
+      let path = fourierPath(
+        160,
+        time,
+        Math.min(canvas.width, canvas.height)*0.37,
+        canvas.width/2,
+        canvas.height/2
+      );
+      ctx.beginPath();
+      for (let i=0; i<path.length; i++) {
+        let [x, y] = path[i];
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+      requestAnimationFrame(draw);
+    }
+    requestAnimationFrame(draw);
+  </script>
+</body>
+</html>
