@@ -1,252 +1,224 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>📚 ISBN Capture</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://unpkg.com/@zxing/browser@latest"></script>
-  <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
-  <script src="https://unpkg.com/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+  <meta charset="UTF-8" />
+  <title>Minimalist Fractal Background</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body {
-      font-family: sans-serif;
-      background: #f4f4f4;
-      padding: 1em;
-      max-width: 600px;
-      margin: auto;
-      text-align: center;
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: #000;
+      overflow: hidden;
     }
-    video, canvas {
-      width: 100%;
-      height: 50vh;
-      border: 1px solid #ccc;
-      margin-top: 1em;
-    }
-    textarea, input[type="text"] {
-      width: 100%;
-      margin-top: 1em;
-      padding: 0.5em;
-      font-size: 1em;
-    }
-    textarea {
-      height: 120px;
-      resize: none;
-    }
-    button {
-      padding: 1em;
-      font-size: 1em;
-      width: 100%;
-      margin-top: 1em;
-      background-color: #4CAF50;
-      color: white;
-      border: none;
-      cursor: pointer;
-    }
-    button:hover {
-      background-color: #45a049;
-    }
-    #status {
-      margin-top: 1em;
-      padding: 0.5em;
-      display: none;
-    }
-    .success {
-      background-color: #dff0d8;
-      color: #3c763d;
-    }
-    .error {
-      background-color: #f2dede;
-      color: #a94442;
+    canvas {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100vw; height: 100vh; /* CSS size */
+      background: #000;
+      display: block;
+      pointer-events: none; /* background only */
     }
   </style>
 </head>
 <body>
-  <h1>📚 ISBN Capture</h1>
-
-  <video id="video" autoplay muted playsinline></video>
-  <canvas id="canvas" style="display:none;"></canvas>
-
-  <button id="shutter">📸 Detect ISBN</button>
-  <button id="manualBtn">✏️ Manual Entry</button>
-
-  <div id="status"></div>
-
-  <input type="text" id="manualInput" placeholder="Enter ISBN manually..." style="display:none;" />
-  <textarea id="isbnList" readonly placeholder="Verified ISBNs will appear here..."></textarea>
-
-  <button id="sendEmail">📧 Send to Email</button>
-
+  <canvas id="bg"></canvas>
   <script>
-    const video = document.getElementById("video");
-    const canvas = document.getElementById("canvas");
-    const statusDiv = document.getElementById("status");
-    const manualInput = document.getElementById("manualInput");
-    const isbnList = document.getElementById("isbnList");
+    const canvas = document.getElementById('bg');
+    const ctx = canvas.getContext('2d', { alpha: false });
 
-    const GOOGLE_API = "https://www.googleapis.com/books/v1/volumes?q=isbn:";
-    const OPENLIBRARY_API = "https://openlibrary.org/api/books?bibkeys=ISBN:";
+    // Backing-store pixel size to match devicePixelRatio
+    function resize() {
+      const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = Math.round(rect.width * dpr);
+      canvas.height = Math.round(rect.height * dpr);
+      // For pixel ops, use native pixels: no ctx.scale here
+    }
+    window.addEventListener('resize', resize, { passive: true });
+    window.addEventListener('orientationchange', resize, { passive: true });
+    resize();
 
-    function showStatus(msg, isError = false) {
-      statusDiv.textContent = msg;
-      statusDiv.className = isError ? 'error' : 'success';
-      statusDiv.style.display = 'block';
+    // State
+    let mode = 'julia'; // 'julia' | 'mandelbrot'
+    let autoC = true;
+    let maxIter = 160;
+    let zoom = 1.0;
+    let centerX = -0.5, centerY = 0.0; // good default for Mandelbrot
+    let mouseX = 0.0, mouseY = 0.0;
+
+    // Map from screen to complex plane
+    function viewParams() {
+      const W = canvas.width, H = canvas.height;
+      const aspect = W / H;
+      // Dynamic view: Mandelbrot uses [-2..1] base, Julia a bit tighter
+      const base = (mode === 'mandelbrot') ? 1.4 : 1.2;
+      const vy = base / zoom;
+      const vx = vy * aspect;
+      return { W, H, vx, vy };
     }
 
-    function cleanISBN(text) {
-      const match = text.match(/(?:ISBN(?:-1[03])?:?\s*)?((97[89][- ]?)?\d{9}[\dXx])/i);
-      return match ? match[1].replace(/[-\s]/g, '') : null;
-    }
-
-    async function verifyISBN(isbn) {
-      let title = null;
-
-      // Google Books
-      try {
-        const res = await fetch(`${GOOGLE_API}${isbn}`);
-        const data = await res.json();
-        if (data.totalItems > 0) {
-          title = data.items[0].volumeInfo.title;
-        }
-      } catch {}
-
-      // OpenLibrary fallback
-      if (!title) {
-        try {
-          const res = await fetch(`${OPENLIBRARY_API}${isbn}&format=json&jscmd=data`);
-          const data = await res.json();
-          if (data[`ISBN:${isbn}`]?.title) {
-            title = data[`ISBN:${isbn}`].title;
-          }
-        } catch {}
+    // Smooth coloring helper (HSV -> RGB)
+    function hsvToRgb(h, s, v) {
+      h = (h % 1 + 1) % 1;
+      let r=0, g=0, b=0;
+      const i = Math.floor(h * 6);
+      const f = h * 6 - i;
+      const p = v * (1 - s);
+      const q = v * (1 - f * s);
+      const t = v * (1 - (1 - f) * s);
+      switch (i % 6) {
+        case 0: r=v, g=t, b=p; break;
+        case 1: r=q, g=v, b=p; break;
+        case 2: r=p, g=v, b=t; break;
+        case 3: r=p, g=q, b=v; break;
+        case 4: r=t, g=p, b=v; break;
+        case 5: r=v, g=p, b=q; break;
       }
-
-      return title || null;
+      return [Math.round(r*255), Math.round(g*255), Math.round(b*255)];
     }
 
-    function addISBNToList(isbn, title) {
-      isbnList.value += `${isbn}\t${title}\n`;
-    }
+    // Render one frame of fractal
+    function renderFractal(t) {
+      const { W, H, vx, vy } = viewParams();
+      const imageData = ctx.createImageData(W, H);
+      const data = imageData.data;
 
-    async function detectFromCanvas(blob) {
-      const imageUrl = URL.createObjectURL(blob);
-
-      // Try Quagga
-      const quaggaISBN = await new Promise(resolve => {
-        Quagga.decodeSingle({
-          src: imageUrl,
-          locate: true,
-          decoder: { readers: ['ean_reader', 'upc_reader'] }
-        }, result => {
-          if (result?.codeResult?.code) resolve(cleanISBN(result.codeResult.code));
-          else resolve(null);
-        });
-      });
-
-      if (quaggaISBN) return quaggaISBN;
-
-      // Try ZXing
-      try {
-        const zxing = new ZXing.BrowserMultiFormatReader();
-        const result = await zxing.decodeFromImageUrl(imageUrl);
-        return cleanISBN(result.text);
-      } catch {}
-
-      // OCR with filters
-      try {
-        const img = new Image();
-        img.src = imageUrl;
-        await img.decode();
-
-        const ctx = canvas.getContext("2d");
-        ctx.filter = "grayscale(100%) contrast(150%)";
-        ctx.drawImage(img, 0, 0);
-        const enhancedBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.95));
-
-        const { data: { text } } = await Tesseract.recognize(enhancedBlob, 'eng');
-        const isbnFromText = smartOCRExtract(text);
-        return isbnFromText;
-      } catch (err) {
-        console.error("OCR failed", err);
-      }
-
-      return null;
-    }
-
-    function smartOCRExtract(text) {
-      const lines = text.split('\n');
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].toLowerCase().includes("isbn")) {
-          const right = lines[i].split("isbn")[1];
-          const isbn = cleanISBN(right || lines[i + 1] || "");
-          if (isbn) return isbn;
-        }
-      }
-      return cleanISBN(text);
-    }
-
-    document.getElementById("shutter").onclick = async () => {
-      showStatus("Capturing...");
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(video, 0, 0);
-
-      canvas.toBlob(async blob => {
-        const isbn = await detectFromCanvas(blob);
-        if (isbn) {
-          const title = await verifyISBN(isbn);
-          if (title) {
-            addISBNToList(isbn, title);
-            showStatus(`✅ Found: ${isbn} - ${title}`);
-          } else {
-            manualInput.value = isbn;
-            manualInput.style.display = 'block';
-            showStatus("⚠️ ISBN not recognized. Please verify manually.", true);
-          }
-        } else {
-          manualInput.style.display = 'block';
-          showStatus("❌ No valid ISBN found. Use manual entry.", true);
-        }
-      }, "image/jpeg", 0.95);
-    };
-
-    document.getElementById("manualBtn").onclick = () => {
-      manualInput.style.display = 'block';
-    };
-
-    manualInput.addEventListener("change", async () => {
-      const isbn = cleanISBN(manualInput.value);
-      if (!isbn) return showStatus("Invalid ISBN format", true);
-      const title = await verifyISBN(isbn);
-      if (title) {
-        addISBNToList(isbn, title);
-        showStatus(`✅ Added: ${isbn} - ${title}`);
-        manualInput.value = "";
-        manualInput.style.display = 'none';
+      // Time-based Julia parameter
+      // Animate c on a small circle unless mouse is used
+      const time = (t || 0) * 0.00025;
+      let cRe, cIm;
+      if (autoC) {
+        const r = 0.7885; // within connected sets for rich structure
+        cRe = r * Math.cos(time * 4.0);
+        cIm = r * Math.sin(time * 3.0);
       } else {
-        showStatus("❌ ISBN not verified.", true);
+        // Map last mouse position (-1..1 range) to c
+        cRe = mouseX * 1.25;
+        cIm = mouseY * 1.25;
+      }
+
+      // Precompute center differently per mode
+      const cx = centerX;
+      const cy = centerY;
+
+      // Iterate pixels
+      // Bailout radius squared
+      const bailout = 4.0;
+
+      let p = 0;
+      for (let j = 0; j < H; j++) {
+        const y0 = cy + (j / H - 0.5) * 2 * vy;
+        for (let i = 0; i < W; i++) {
+          const x0 = cx + (i / W - 0.5) * 2 * vx;
+
+          let zx, zy, cre, cim;
+
+          if (mode === 'mandelbrot') {
+            // z starts at 0, c is pixel
+            zx = 0.0; zy = 0.0;
+            cre = x0; cim = y0;
+          } else {
+            // Julia: z is pixel, c is global
+            zx = x0; zy = y0;
+            cre = cRe; cim = cIm;
+          }
+
+          let iter = 0;
+          let zx2 = 0.0, zy2 = 0.0;
+          for (; iter < maxIter; iter++) {
+            // z = z^2 + c
+            // (zx + i zy)^2 = (zx^2 - zy^2) + i(2 zx zy)
+            zx2 = zx*zx - zy*zy + cre;
+            zy2 = 2*zx*zy + cim;
+            zx = zx2; zy = zy2;
+
+            // Escape test |z|^2 > 4
+            if (zx*zx + zy*zy > bailout) break;
+          }
+
+          // Smooth iteration count (mu)
+          let mu;
+          if (iter === maxIter) {
+            mu = iter;
+          } else {
+            // mu = k + 1 - log(log(|z|)) / log 2
+            const mag2 = zx*zx + zy*zy;
+            const log_zn = Math.log(mag2) / 2;
+            const nu = Math.log(log_zn / Math.log(2)) / Math.log(2);
+            mu = iter + 1 - nu;
+          }
+
+          // Color mapping
+          let r, g, b;
+          if (iter === maxIter) {
+            // Interior
+            r = g = b = 0;
+          } else {
+            // Palette: hue cycles with mu, slight accent on saturation
+            const hue = 0.85 + 0.035 * mu; // blue-violet range
+            const sat = 0.9;
+            const val = 0.95 - 0.35 * Math.exp(-0.02 * mu);
+            [r, g, b] = hsvToRgb(hue, sat, val);
+          }
+
+          data[p++] = r;
+          data[p++] = g;
+          data[p++] = b;
+          data[p++] = 255;
+        }
+      }
+
+      ctx.putImageData(imageData, 0, 0);
+    }
+
+    // Animation loop
+    function loop(ts) {
+      renderFractal(ts);
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+
+    // Optional: mouse influence for Julia c
+    window.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const nx = (e.clientX - rect.left) / rect.width;  // 0..1
+      const ny = (e.clientY - rect.top) / rect.height;  // 0..1
+      mouseX = (nx - 0.5) * 2; // -1..1
+      mouseY = (ny - 0.5) * 2; // -1..1
+    }, { passive: true });
+
+    // Simple keyboard controls (window: canvas is pointer-events:none)
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'j' || e.key === 'J') {
+        mode = 'julia';
+      } else if (e.key === 'm' || e.key === 'M') {
+        mode = 'mandelbrot';
+      } else if (e.key === 'a' || e.key === 'A') {
+        autoC = !autoC;
+      } else if (e.key === '+') {
+        maxIter = Math.min(2000, maxIter + 40);
+      } else if (e.key === '-') {
+        maxIter = Math.max(40, maxIter - 40);
+      } else if (e.key === 'r' || e.key === 'R') {
+        zoom = 1.0;
+        centerX = -0.5;
+        centerY = 0.0;
+      } else if (e.key === 'ArrowUp') {
+        centerY -= 0.1 / zoom;
+      } else if (e.key === 'ArrowDown') {
+        centerY += 0.1 / zoom;
+      } else if (e.key === 'ArrowLeft') {
+        centerX -= 0.1 / zoom;
+      } else if (e.key === 'ArrowRight') {
+        centerX += 0.1 / zoom;
+      } else if (e.key === '[') {
+        zoom = Math.max(0.25, zoom / 1.2);
+      } else if (e.key === ']') {
+        zoom = Math.min(64, zoom * 1.2);
       }
     });
-
-    document.getElementById("sendEmail").onclick = () => {
-      const body = encodeURIComponent(isbnList.value.trim());
-      const subject = "My Book ISBNs";
-      const mailto = `mailto:?subject=${subject}&body=${body}`;
-      window.location.href = mailto;
-    };
-
-    async function initCamera() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-        video.srcObject = stream;
-        showStatus("Camera ready");
-      } catch (err) {
-        console.error(err);
-        showStatus("Camera unavailable. Switching to manual.", true);
-        manualInput.style.display = 'block';
-      }
-    }
-
-    window.onload = initCamera;
   </script>
 </body>
 </html>
